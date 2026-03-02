@@ -196,6 +196,7 @@ tailbus [flags] <command> [args]
 | `sessions` | `sessions <handle>` | List sessions involving a handle |
 | `dashboard` | `dashboard` | Launch interactive TUI dashboard |
 | `trace` | `trace <trace-id>` | Display distributed trace spans for a trace ID |
+| `agent` | `agent` | Stdio JSON-lines bridge for scripting and LLM agents |
 
 ## Distributed Tracing
 
@@ -328,6 +329,70 @@ All inter-component communication uses **gRPC** with Protocol Buffers:
 - **AgentAPI** — agents connect to their local daemon via **Unix socket**
 - **CoordinationAPI** — daemons connect to the coord server via **TCP**
 - **NodeTransport** — daemons connect to each other via **TCP** for P2P message exchange
+
+## Stdio Agent Bridge
+
+The `tailbus agent` subcommand provides a **JSON-lines stdio bridge** so any process can communicate with tailbus by reading/writing newline-delimited JSON on stdin/stdout — no protobuf or gRPC client needed. This is ideal for scripting languages, LLM tool-use agents, and quick integrations.
+
+```bash
+# Start the bridge (reads JSON commands from stdin, writes JSON to stdout, logs to stderr)
+./bin/tailbus agent
+```
+
+### Protocol
+
+**Inbound (stdin)** — one JSON object per line:
+
+```jsonl
+{"type":"register","handle":"marketing"}
+{"type":"open","to":"sales","payload":"Need Q4 numbers"}
+{"type":"open","to":"sales","payload":"{}","content_type":"application/json","trace_id":"my-id"}
+{"type":"send","session":"<id>","payload":"Q4 revenue: $1.2M"}
+{"type":"resolve","session":"<id>","payload":"Thanks!"}
+{"type":"resolve","session":"<id>"}
+{"type":"sessions"}
+```
+
+- `register` must be the first command (one registration per process)
+- `content_type` defaults to `text/plain` if omitted
+- `trace_id` on `open` is optional (auto-generated if omitted)
+- `payload` on `resolve` is optional
+
+**Outbound (stdout)** — one JSON object per line:
+
+```jsonl
+{"type":"registered","handle":"marketing"}
+{"type":"opened","session":"<id>","message_id":"<id>","trace_id":"<id>"}
+{"type":"sent","message_id":"<id>"}
+{"type":"resolved","message_id":"<id>"}
+{"type":"message","session":"<id>","from":"sales","to":"marketing","payload":"hi","content_type":"text/plain","message_type":"session_open","trace_id":"<id>","message_id":"<id>","sent_at":1709391095}
+{"type":"sessions","sessions":[{"session":"<id>","from":"a","to":"b","state":"open"}]}
+{"type":"error","error":"session not found","request_type":"send"}
+```
+
+- Incoming messages from other agents appear as `type: "message"`
+- `message_type` is one of: `session_open`, `message`, `session_resolve`, `ack`
+- Errors include `request_type` for correlation
+- The bridge exits on stdin EOF or SIGINT
+
+### Example: Python agent
+
+```python
+import subprocess, json
+
+proc = subprocess.Popen(
+    ["./bin/tailbus", "-socket", "/tmp/tailbusd.sock", "agent"],
+    stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True
+)
+
+def send(cmd):
+    proc.stdin.write(json.dumps(cmd) + "\n")
+    proc.stdin.flush()
+    return json.loads(proc.stdout.readline())
+
+print(send({"type": "register", "handle": "my-python-agent"}))
+print(send({"type": "open", "to": "sales", "payload": "hello from python"}))
+```
 
 ## Building External Agents
 

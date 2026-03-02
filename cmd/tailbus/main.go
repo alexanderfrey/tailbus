@@ -28,7 +28,7 @@ func main() {
 	args := flag.Args()
 	if len(args) == 0 {
 		fmt.Println("Usage: tailbus [command] [args...]")
-		fmt.Println("Commands: register, open, send, subscribe, resolve, sessions, dashboard, trace")
+		fmt.Println("Commands: register, open, send, subscribe, resolve, sessions, dashboard, trace, agent")
 		os.Exit(1)
 	}
 
@@ -147,6 +147,12 @@ func main() {
 		}
 		for _, s := range resp.Sessions {
 			fmt.Printf("  %s  %s -> %s  [%s]\n", s.SessionId[:8], s.FromHandle, s.ToHandle, s.State)
+		}
+
+	case "agent":
+		if err := runAgent(client, logger); err != nil {
+			logger.Error("agent bridge error", "error", err)
+			os.Exit(1)
 		}
 
 	case "dashboard":
