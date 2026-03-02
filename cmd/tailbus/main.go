@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	agentpb "github.com/alexanderfrey/tailbus/api/agentpb"
+	messagepb "github.com/alexanderfrey/tailbus/api/messagepb"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 )
@@ -45,11 +46,28 @@ func main() {
 
 	switch args[0] {
 	case "register":
-		if len(args) < 2 {
-			fmt.Println("Usage: tailbus register <handle>")
+		regFlags := flag.NewFlagSet("register", flag.ExitOnError)
+		regDesc := regFlags.String("description", "", "service description")
+		regTags := regFlags.String("tags", "", "comma-separated tags")
+		regVersion := regFlags.String("version", "", "service version")
+		regFlags.Parse(args[1:])
+		if regFlags.NArg() < 1 {
+			fmt.Println("Usage: tailbus register <handle> [-description \"...\"] [-tags \"a,b\"] [-version \"1.0\"]")
 			os.Exit(1)
 		}
-		resp, err := client.Register(ctx, &agentpb.RegisterRequest{Handle: args[1]})
+		handle := regFlags.Arg(0)
+		req := &agentpb.RegisterRequest{Handle: handle}
+		if *regDesc != "" || *regTags != "" || *regVersion != "" {
+			m := &messagepb.ServiceManifest{
+				Description: *regDesc,
+				Version:     *regVersion,
+			}
+			if *regTags != "" {
+				m.Tags = strings.Split(*regTags, ",")
+			}
+			req.Manifest = m
+		}
+		resp, err := client.Register(ctx, req)
 		if err != nil {
 			logger.Error("register failed", "error", err)
 			os.Exit(1)
@@ -58,7 +76,7 @@ func main() {
 			fmt.Printf("Registration failed: %s\n", resp.Error)
 			os.Exit(1)
 		}
-		fmt.Printf("Registered as %q\n", args[1])
+		fmt.Printf("Registered as %q\n", handle)
 
 	case "introspect":
 		if len(args) < 2 {

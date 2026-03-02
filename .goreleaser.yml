@@ -1,0 +1,40 @@
+version: 2
+
+builds:
+  - id: tailbus-coord
+    main: ./cmd/tailbus-coord
+    binary: tailbus-coord
+    env:
+      - CGO_ENABLED=0
+    goos: [linux, darwin]
+    goarch: [amd64, arm64]
+
+  - id: tailbusd
+    main: ./cmd/tailbusd
+    binary: tailbusd
+    env:
+      - CGO_ENABLED=0
+    goos: [linux, darwin]
+    goarch: [amd64, arm64]
+
+  - id: tailbus
+    main: ./cmd/tailbus
+    binary: tailbus
+    env:
+      - CGO_ENABLED=0
+    goos: [linux, darwin]
+    goarch: [amd64, arm64]
+
+archives:
+  - id: default
+    format: tar.gz
+    name_template: "tailbus_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    builds:
+      - tailbus-coord
+      - tailbusd
+      - tailbus
+
+release:
+  github:
+    owner: alexanderfrey
+    name: tailbus
