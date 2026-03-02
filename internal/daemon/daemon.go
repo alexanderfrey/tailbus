@@ -81,6 +81,13 @@ func (d *Daemon) Run(ctx context.Context) error {
 		return fmt.Errorf("register with coord: %w", err)
 	}
 
+	// When local handles change, re-register with coord so peer map updates immediately
+	d.agentServer.SetOnHandleChange(func(handles []string) {
+		if err := cc.Register(ctx, handles); err != nil {
+			d.logger.Error("failed to re-register handles with coord", "error", err)
+		}
+	})
+
 	// Start P2P transport listener
 	p2pLis, err := net.Listen("tcp", d.cfg.ListenAddr)
 	if err != nil {

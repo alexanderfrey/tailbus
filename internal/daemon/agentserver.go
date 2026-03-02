@@ -29,9 +29,10 @@ type AgentServer struct {
 	router   Router
 	grpc     *grpc.Server
 
-	mu          sync.RWMutex
-	handles     map[string]bool                      // registered handles on this node
-	subscribers map[string][]chan *agentpb.IncomingMessage // handle -> subscriber channels
+	mu              sync.RWMutex
+	handles         map[string]bool                          // registered handles on this node
+	subscribers     map[string][]chan *agentpb.IncomingMessage // handle -> subscriber channels
+	onHandleChange  func(handles []string)                   // called when handles change
 }
 
 // NewAgentServer creates a new agent server.
@@ -69,6 +70,11 @@ func (s *AgentServer) ServeTCP(lis net.Listener) error {
 // SetRouter sets the router (used for breaking circular dependency during setup).
 func (s *AgentServer) SetRouter(r Router) {
 	s.router = r
+}
+
+// SetOnHandleChange sets a callback invoked when local handles change.
+func (s *AgentServer) SetOnHandleChange(fn func(handles []string)) {
+	s.onHandleChange = fn
 }
 
 // GracefulStop stops the server gracefully.
@@ -126,6 +132,16 @@ func (s *AgentServer) Register(_ context.Context, req *agentpb.RegisterRequest) 
 
 	s.handles[req.Handle] = true
 	s.logger.Info("agent registered", "handle", req.Handle)
+
+	// Notify coord about handle change (must copy handles while holding lock)
+	if s.onHandleChange != nil {
+		handles := make([]string, 0, len(s.handles))
+		for h := range s.handles {
+			handles = append(handles, h)
+		}
+		go s.onHandleChange(handles)
+	}
+
 	return &agentpb.RegisterResponse{Ok: true}, nil
 }
 
