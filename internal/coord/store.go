@@ -27,7 +27,7 @@ type Store struct {
 
 // NewStore opens or creates a SQLite database at the given path.
 func NewStore(dbPath string) (*Store, error) {
-	db, err := sql.Open("sqlite", dbPath+"?_pragma=journal_mode(WAL)")
+	db, err := sql.Open("sqlite", dbPath+"?_pragma=journal_mode(WAL)&_pragma=foreign_keys(1)")
 	if err != nil {
 		return nil, fmt.Errorf("open database: %w", err)
 	}
@@ -270,6 +270,17 @@ func (s *Store) LookupHandle(handle string) (*NodeRecord, error) {
 func (s *Store) RemoveNode(nodeID string) error {
 	_, err := s.db.Exec("DELETE FROM nodes WHERE node_id = ?", nodeID)
 	return err
+}
+
+// RemoveStaleNodes removes nodes whose last heartbeat is older than the given time.
+// Returns the number of nodes removed.
+func (s *Store) RemoveStaleNodes(olderThan time.Time) (int, error) {
+	res, err := s.db.Exec("DELETE FROM nodes WHERE last_heartbeat < ?", olderThan.Unix())
+	if err != nil {
+		return 0, err
+	}
+	n, _ := res.RowsAffected()
+	return int(n), nil
 }
 
 // Close closes the database.

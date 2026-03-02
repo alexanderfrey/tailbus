@@ -22,8 +22,9 @@ type GRPCTransport struct {
 	receiveFn func(*messagepb.Envelope)
 	sendFn    func(*messagepb.Envelope)
 
-	mu    sync.RWMutex
+	mu    sync.Mutex
 	peers map[string]*peerConn // addr -> peer connection
+	ctx   context.Context      // daemon lifetime context
 }
 
 type peerConn struct {
@@ -37,12 +38,21 @@ func NewGRPCTransport(logger *slog.Logger) *GRPCTransport {
 	t := &GRPCTransport{
 		logger: logger,
 		peers:  make(map[string]*peerConn),
+		ctx:    context.Background(), // default until Start() is called
 	}
 
 	gs := grpc.NewServer()
 	transportpb.RegisterNodeTransportServer(gs, t)
 	t.grpcSrv = gs
 	return t
+}
+
+// Start stores the daemon context. All outbound streams will be bound to this
+// context so they are torn down when the daemon shuts down.
+func (t *GRPCTransport) Start(ctx context.Context) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.ctx = ctx
 }
 
 // Serve starts listening for incoming peer connections.
@@ -62,6 +72,7 @@ func (t *GRPCTransport) OnSend(fn func(*messagepb.Envelope)) {
 }
 
 // Send sends an envelope to a peer. Establishes connection lazily.
+// On send failure, reconnects under the same lock to avoid races.
 func (t *GRPCTransport) Send(addr string, env *messagepb.Envelope) error {
 	pc, err := t.getOrConnect(addr)
 	if err != nil {
@@ -69,32 +80,36 @@ func (t *GRPCTransport) Send(addr string, env *messagepb.Envelope) error {
 	}
 
 	pc.mu.Lock()
-	defer pc.mu.Unlock()
+	err = pc.stream.Send(env)
+	pc.mu.Unlock()
 
-	if err := pc.stream.Send(env); err != nil {
-		// Connection broken, remove and retry once
-		t.mu.Lock()
-		delete(t.peers, addr)
-		t.mu.Unlock()
-		pc.conn.Close()
-
-		pc2, err := t.connect(addr)
-		if err != nil {
-			return fmt.Errorf("reconnect to %s: %w", addr, err)
-		}
-		t.mu.Lock()
-		t.peers[addr] = pc2
-		t.mu.Unlock()
-
-		pc2.mu.Lock()
-		defer pc2.mu.Unlock()
-		if err := pc2.stream.Send(env); err != nil {
-			return err
-		}
+	if err == nil {
 		if t.sendFn != nil {
 			t.sendFn(env)
 		}
 		return nil
+	}
+
+	// Connection broken — reconnect under lock to avoid races
+	t.mu.Lock()
+	// Only clean up if the peer entry is still the same broken connection
+	if current, ok := t.peers[addr]; ok && current == pc {
+		delete(t.peers, addr)
+		pc.conn.Close()
+	}
+
+	pc2, cerr := t.connectLocked(addr)
+	if cerr != nil {
+		t.mu.Unlock()
+		return fmt.Errorf("reconnect to %s: %w", addr, cerr)
+	}
+	t.peers[addr] = pc2
+	t.mu.Unlock()
+
+	pc2.mu.Lock()
+	defer pc2.mu.Unlock()
+	if err := pc2.stream.Send(env); err != nil {
+		return err
 	}
 	if t.sendFn != nil {
 		t.sendFn(env)
@@ -103,22 +118,14 @@ func (t *GRPCTransport) Send(addr string, env *messagepb.Envelope) error {
 }
 
 func (t *GRPCTransport) getOrConnect(addr string) (*peerConn, error) {
-	t.mu.RLock()
-	pc, ok := t.peers[addr]
-	t.mu.RUnlock()
-	if ok {
-		return pc, nil
-	}
-
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
-	// Double-check
 	if pc, ok := t.peers[addr]; ok {
 		return pc, nil
 	}
 
-	pc, err := t.connect(addr)
+	pc, err := t.connectLocked(addr)
 	if err != nil {
 		return nil, err
 	}
@@ -126,14 +133,15 @@ func (t *GRPCTransport) getOrConnect(addr string) (*peerConn, error) {
 	return pc, nil
 }
 
-func (t *GRPCTransport) connect(addr string) (*peerConn, error) {
+// connectLocked creates a new peer connection. Must be called with t.mu held.
+func (t *GRPCTransport) connectLocked(addr string) (*peerConn, error) {
 	conn, err := grpc.NewClient(addr, grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {
 		return nil, fmt.Errorf("dial %s: %w", addr, err)
 	}
 
 	client := transportpb.NewNodeTransportClient(conn)
-	stream, err := client.Exchange(context.Background())
+	stream, err := client.Exchange(t.ctx)
 	if err != nil {
 		conn.Close()
 		return nil, fmt.Errorf("open exchange stream to %s: %w", addr, err)
@@ -142,17 +150,25 @@ func (t *GRPCTransport) connect(addr string) (*peerConn, error) {
 	pc := &peerConn{conn: conn, stream: stream}
 
 	// Start receiving on this outbound stream
-	go t.recvLoop(addr, stream)
+	go t.recvLoop(addr, pc, stream)
 
 	t.logger.Info("connected to peer", "addr", addr)
 	return pc, nil
 }
 
-func (t *GRPCTransport) recvLoop(addr string, stream transportpb.NodeTransport_ExchangeClient) {
+func (t *GRPCTransport) recvLoop(addr string, pc *peerConn, stream transportpb.NodeTransport_ExchangeClient) {
 	for {
 		env, err := stream.Recv()
 		if err != nil {
 			t.logger.Debug("peer stream closed", "addr", addr, "error", err)
+			// Clean up the peer entry, but only if it's still the same connection
+			// (a reconnect may have already replaced it)
+			t.mu.Lock()
+			if current, ok := t.peers[addr]; ok && current == pc {
+				delete(t.peers, addr)
+				t.logger.Info("removed stale peer", "addr", addr)
+			}
+			t.mu.Unlock()
 			return
 		}
 		if t.receiveFn != nil {
@@ -176,8 +192,8 @@ func (t *GRPCTransport) Exchange(stream transportpb.NodeTransport_ExchangeServer
 
 // ConnectedAddrs returns the list of currently connected peer addresses.
 func (t *GRPCTransport) ConnectedAddrs() []string {
-	t.mu.RLock()
-	defer t.mu.RUnlock()
+	t.mu.Lock()
+	defer t.mu.Unlock()
 	addrs := make([]string, 0, len(t.peers))
 	for addr := range t.peers {
 		addrs = append(addrs, addr)

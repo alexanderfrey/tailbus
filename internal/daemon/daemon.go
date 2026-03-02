@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"math/rand/v2"
 	"net"
 	"time"
 
@@ -90,6 +91,12 @@ func New(cfg *config.DaemonConfig, logger *slog.Logger) (*Daemon, error) {
 
 // Run starts the daemon and blocks until the context is cancelled.
 func (d *Daemon) Run(ctx context.Context) error {
+	// Bind transport to daemon context so streams close on shutdown
+	d.transport.Start(ctx)
+
+	// Start session eviction (5min TTL, 30s sweep)
+	d.sessions.StartEviction(ctx, 5*time.Minute, 30*time.Second, d.logger)
+
 	// Wire dashboard dependencies
 	d.agentServer.SetDashboardDeps(d.cfg.NodeID, d.resolver, d.transport)
 
@@ -101,8 +108,8 @@ func (d *Daemon) Run(ctx context.Context) error {
 	d.coordClient = cc
 	defer cc.Close()
 
-	// Register with coord
-	if err := cc.Register(ctx, nil, nil); err != nil {
+	// Register with coord (retries with exponential backoff)
+	if err := registerWithRetry(ctx, cc, d.logger); err != nil {
 		return fmt.Errorf("register with coord: %w", err)
 	}
 
@@ -140,8 +147,15 @@ func (d *Daemon) Run(ctx context.Context) error {
 		}
 	}()
 
-	// Heartbeat in background
-	go cc.Heartbeat(ctx, d.agentServer.GetHandles, d.agentServer.GetManifests, 30*time.Second)
+	// Heartbeat in background, with re-registration on "node not found"
+	reRegister := func(ctx context.Context) error {
+		handles := d.agentServer.GetHandles()
+		manifests := d.agentServer.GetManifests()
+		return retryWithBackoff(ctx, time.Second, 30*time.Second, d.logger, func() error {
+			return cc.Register(ctx, handles, manifests)
+		})
+	}
+	go cc.Heartbeat(ctx, d.agentServer.GetHandles, d.agentServer.GetManifests, 30*time.Second, reRegister)
 
 	// Start metrics server if configured
 	if d.cfg.MetricsAddr != "" {
@@ -160,6 +174,45 @@ func (d *Daemon) Run(ctx context.Context) error {
 	d.agentServer.GracefulStop()
 	d.transport.Close()
 	return nil
+}
+
+// registerWithRetry attempts to register with the coord server using
+// exponential backoff: 1s, 2s, 4s, 8s, capped at 30s, with 20% jitter.
+func registerWithRetry(ctx context.Context, cc *CoordClient, logger *slog.Logger) error {
+	return retryWithBackoff(ctx, time.Second, 30*time.Second, logger, func() error {
+		return cc.Register(ctx, nil, nil)
+	})
+}
+
+// retryWithBackoff retries fn with exponential backoff and 20% jitter until
+// it succeeds or the context is cancelled.
+func retryWithBackoff(ctx context.Context, initial, max time.Duration, logger *slog.Logger, fn func() error) error {
+	backoff := initial
+	for {
+		err := fn()
+		if err == nil {
+			return nil
+		}
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		if logger != nil {
+			logger.Warn("operation failed, retrying", "error", err, "backoff", backoff)
+		}
+
+		// Add 20% jitter
+		jitter := time.Duration(float64(backoff) * 0.2 * rand.Float64())
+		sleep := backoff + jitter
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(sleep):
+		}
+		backoff *= 2
+		if backoff > max {
+			backoff = max
+		}
+	}
 }
 
 // AgentServer returns the agent server (used for testing).

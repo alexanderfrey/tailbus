@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"log/slog"
 	"net"
@@ -8,6 +9,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"syscall"
+	"time"
 
 	"github.com/alexanderfrey/tailbus/internal/config"
 	"github.com/alexanderfrey/tailbus/internal/coord"
@@ -52,6 +54,11 @@ func main() {
 
 	srv := coord.NewServer(store, logger)
 
+	// Start stale-node reaper (90s TTL, 30s sweep)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	srv.StartReaper(ctx, 90*time.Second, 30*time.Second)
+
 	lis, err := net.Listen("tcp", cfg.ListenAddr)
 	if err != nil {
 		logger.Error("failed to listen", "error", err)
@@ -63,6 +70,7 @@ func main() {
 	go func() {
 		<-sigCh
 		logger.Info("shutting down")
+		cancel()
 		srv.GracefulStop()
 	}()
 

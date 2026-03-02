@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net"
+	"time"
 
 	pb "github.com/alexanderfrey/tailbus/api/coordpb"
 	messagepb "github.com/alexanderfrey/tailbus/api/messagepb"
@@ -15,6 +16,7 @@ import (
 type Server struct {
 	pb.UnimplementedCoordinationAPIServer
 
+	store    *Store
 	registry *Registry
 	peerMap  *PeerMap
 	logger   *slog.Logger
@@ -27,6 +29,7 @@ func NewServer(store *Store, logger *slog.Logger) *Server {
 	peerMap := NewPeerMap(store, logger)
 
 	s := &Server{
+		store:    store,
 		registry: registry,
 		peerMap:  peerMap,
 		logger:   logger,
@@ -42,6 +45,35 @@ func NewServer(store *Store, logger *slog.Logger) *Server {
 func (s *Server) Serve(lis net.Listener) error {
 	s.logger.Info("coordination server listening", "addr", lis.Addr())
 	return s.grpc.Serve(lis)
+}
+
+// StartReaper starts a background goroutine that removes nodes whose last
+// heartbeat is older than ttl. It sweeps every interval and broadcasts the
+// peer map when stale nodes are removed. The goroutine exits when ctx is cancelled.
+func (s *Server) StartReaper(ctx context.Context, ttl, interval time.Duration) {
+	go func() {
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				cutoff := time.Now().Add(-ttl)
+				n, err := s.store.RemoveStaleNodes(cutoff)
+				if err != nil {
+					s.logger.Error("reaper: failed to remove stale nodes", "error", err)
+					continue
+				}
+				if n > 0 {
+					s.logger.Info("reaper: evicted stale nodes", "count", n)
+					if err := s.peerMap.ForceBroadcast(); err != nil {
+						s.logger.Error("reaper: failed to broadcast peer map", "error", err)
+					}
+				}
+			}
+		}
+	}()
 }
 
 // GracefulStop stops the server gracefully.

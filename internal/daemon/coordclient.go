@@ -109,8 +109,10 @@ func (c *CoordClient) WatchPeerMap(ctx context.Context) error {
 }
 
 // Heartbeat sends periodic heartbeats to the coordination server.
-// Blocks until the context is cancelled.
-func (c *CoordClient) Heartbeat(ctx context.Context, getHandles func() []string, getManifests func() map[string]*messagepb.ServiceManifest, interval time.Duration) {
+// If the coord responds with Ok: false (e.g. "node not found" after a coord
+// restart), it calls reRegister to re-register the node. Blocks until the
+// context is cancelled.
+func (c *CoordClient) Heartbeat(ctx context.Context, getHandles func() []string, getManifests func() map[string]*messagepb.ServiceManifest, interval time.Duration, reRegister func(ctx context.Context) error) {
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 
@@ -128,7 +130,7 @@ func (c *CoordClient) Heartbeat(ctx context.Context, getHandles func() []string,
 					descs[h] = m.Description
 				}
 			}
-			_, err := c.client.Heartbeat(ctx, &pb.HeartbeatRequest{
+			resp, err := c.client.Heartbeat(ctx, &pb.HeartbeatRequest{
 				NodeId:             c.nodeID,
 				Handles:            handles,
 				HandleDescriptions: descs,
@@ -136,6 +138,19 @@ func (c *CoordClient) Heartbeat(ctx context.Context, getHandles func() []string,
 			})
 			if err != nil {
 				c.logger.Error("heartbeat failed", "error", err)
+				if reRegister != nil {
+					c.logger.Warn("heartbeat error, attempting re-registration")
+					if rerr := reRegister(ctx); rerr != nil {
+						c.logger.Error("re-registration failed", "error", rerr)
+					}
+				}
+				continue
+			}
+			if !resp.Ok && reRegister != nil {
+				c.logger.Warn("heartbeat rejected (node not found), re-registering")
+				if rerr := reRegister(ctx); rerr != nil {
+					c.logger.Error("re-registration failed", "error", rerr)
+				}
 			}
 		}
 	}

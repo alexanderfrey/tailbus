@@ -19,10 +19,10 @@ build:
 	go build -o bin/tailbus ./cmd/tailbus
 
 test:
-	go test ./internal/... -count=1
+	go test -race ./internal/... -count=1
 
 test-all:
-	go test ./... -v -count=1
+	go test -race ./... -v -count=1
 
 clean:
 	rm -rf bin/

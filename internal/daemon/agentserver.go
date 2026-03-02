@@ -373,6 +373,7 @@ func (s *AgentServer) ResolveSession(ctx context.Context, req *agentpb.ResolveSe
 	if err := sess.Resolve(); err != nil {
 		return nil, err
 	}
+	s.sessions.Put(sess) // persist resolved clone back to store
 
 	// Observe session lifetime
 	if s.metrics != nil {
