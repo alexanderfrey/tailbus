@@ -72,17 +72,42 @@ func TestEndToEnd(t *testing.T) {
 	activity1 := daemon.NewActivityBus()
 	activity2 := daemon.NewActivityBus()
 
+	// --- Create trace stores ---
+	traceStore1 := daemon.NewTraceStore(1000)
+	traceStore2 := daemon.NewTraceStore(1000)
+
 	// --- Create agent servers with routers ---
 	agentSrv1 := daemon.NewAgentServer(sessions1, nil, activity1, logger.With("component", "agent-1"))
+	agentSrv1.SetDashboardDeps("node-1", resolver1, tp1)
+	agentSrv1.SetTracing(traceStore1, nil)
 	router1 := daemon.NewMessageRouter(resolver1, tp1, agentSrv1, activity1, logger.With("component", "router-1"))
+	router1.SetTracing(traceStore1, nil, "node-1")
 	agentSrv1.SetRouter(router1)
 
 	agentSrv2 := daemon.NewAgentServer(sessions2, nil, activity2, logger.With("component", "agent-2"))
+	agentSrv2.SetDashboardDeps("node-2", resolver2, tp2)
+	agentSrv2.SetTracing(traceStore2, nil)
 	router2 := daemon.NewMessageRouter(resolver2, tp2, agentSrv2, activity2, logger.With("component", "router-2"))
+	router2.SetTracing(traceStore2, nil, "node-2")
 	agentSrv2.SetRouter(router2)
+
+	// Wire transport send callbacks for tracing
+	tp1.OnSend(func(env *messagepb.Envelope) {
+		if env.TraceId != "" {
+			traceStore1.RecordSpan(env.TraceId, env.MessageId, "node-1", agentpb.TraceAction_TRACE_ACTION_SENT_TO_TRANSPORT, nil)
+		}
+	})
+	tp2.OnSend(func(env *messagepb.Envelope) {
+		if env.TraceId != "" {
+			traceStore2.RecordSpan(env.TraceId, env.MessageId, "node-2", agentpb.TraceAction_TRACE_ACTION_SENT_TO_TRANSPORT, nil)
+		}
+	})
 
 	// Wire transport receive to local delivery
 	tp1.OnReceive(func(env *messagepb.Envelope) {
+		if env.TraceId != "" {
+			traceStore1.RecordSpan(env.TraceId, env.MessageId, "node-1", agentpb.TraceAction_TRACE_ACTION_RECEIVED_FROM_TRANSPORT, nil)
+		}
 		// When node1 receives a message from the network, try to deliver locally
 		// If the session doesn't exist locally, create it
 		if _, ok := sessions1.Get(env.SessionId); !ok {
@@ -99,6 +124,9 @@ func TestEndToEnd(t *testing.T) {
 		agentSrv1.DeliverToLocal(env)
 	})
 	tp2.OnReceive(func(env *messagepb.Envelope) {
+		if env.TraceId != "" {
+			traceStore2.RecordSpan(env.TraceId, env.MessageId, "node-2", agentpb.TraceAction_TRACE_ACTION_RECEIVED_FROM_TRANSPORT, nil)
+		}
 		if _, ok := sessions2.Get(env.SessionId); !ok {
 			sess := &session.Session{
 				ID:        env.SessionId,
@@ -309,6 +337,36 @@ func TestEndToEnd(t *testing.T) {
 	}
 	t.Logf("Node status: handles=%d sessions=%d msgs_routed=%d",
 		len(statusResp.Handles), len(statusResp.Sessions), statusResp.Counters.MessagesRouted)
+
+	// --- Verify tracing via GetTrace RPC ---
+	// The open response should have included a trace ID
+	traceID := openResp.TraceId
+	if traceID == "" {
+		t.Fatal("expected trace_id in OpenSession response")
+	}
+	t.Logf("Trace ID: %s", traceID)
+
+	traceResp, err := agent1.GetTrace(ctx, &agentpb.GetTraceRequest{TraceId: traceID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(traceResp.Spans) == 0 {
+		t.Fatal("expected trace spans from node-1")
+	}
+	t.Logf("Node-1 trace spans: %d", len(traceResp.Spans))
+	for _, span := range traceResp.Spans {
+		t.Logf("  %s  %s  msg:%s  node:%s", span.Timestamp.AsTime().Format("15:04:05.000"), span.Action, span.MessageId[:8], span.NodeId)
+	}
+
+	// Verify node-2 also has trace spans
+	traceResp2, err := agent2.GetTrace(ctx, &agentpb.GetTraceRequest{TraceId: traceID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(traceResp2.Spans) == 0 {
+		t.Fatal("expected trace spans from node-2")
+	}
+	t.Logf("Node-2 trace spans: %d", len(traceResp2.Spans))
 
 	t.Log("End-to-end test passed!")
 }

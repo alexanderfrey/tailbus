@@ -22,6 +22,7 @@ type DaemonConfig struct {
 	SocketPath    string `toml:"socket_path"`
 	KeyFile       string `toml:"key_file"`
 	DataDir       string `toml:"data_dir"`
+	MetricsAddr   string `toml:"metrics_addr"`
 }
 
 // LoadCoordConfig loads a coordination server config from a TOML file.
@@ -61,6 +62,9 @@ func LoadDaemonConfig(path string) (*DaemonConfig, error) {
 	}
 	if cfg.KeyFile == "" {
 		cfg.KeyFile = "/var/lib/tailbusd/node.key"
+	}
+	if cfg.MetricsAddr == "" {
+		cfg.MetricsAddr = ":9090"
 	}
 	return &cfg, nil
 }

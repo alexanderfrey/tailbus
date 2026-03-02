@@ -186,9 +186,17 @@ func formatActivity(event *agentpb.ActivityEvent) activityEntry {
 		if e.MessageRouted.Remote {
 			dest = "REMOTE"
 		}
+		traceTag := ""
+		if e.MessageRouted.TraceId != "" {
+			tid := e.MessageRouted.TraceId
+			if len(tid) > 8 {
+				tid = tid[:8]
+			}
+			traceTag = fmt.Sprintf(" t:%s", tid)
+		}
 		return activityEntry{
 			time:  ts,
-			label: fmt.Sprintf("MSG %s -> %s [%s]", e.MessageRouted.FromHandle, e.MessageRouted.ToHandle, dest),
+			label: fmt.Sprintf("MSG %s -> %s [%s]%s", e.MessageRouted.FromHandle, e.MessageRouted.ToHandle, dest, traceTag),
 			style: actMsgStyle,
 		}
 	case *agentpb.ActivityEvent_SessionOpened:

@@ -12,6 +12,13 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 )
 
+func short(id string) string {
+	if len(id) > 8 {
+		return id[:8]
+	}
+	return id
+}
+
 func main() {
 	socketPath := flag.String("socket", "/tmp/tailbusd.sock", "daemon Unix socket path")
 	flag.Parse()
@@ -21,7 +28,7 @@ func main() {
 	args := flag.Args()
 	if len(args) == 0 {
 		fmt.Println("Usage: tailbus [command] [args...]")
-		fmt.Println("Commands: register, open, send, subscribe, resolve, sessions, dashboard")
+		fmt.Println("Commands: register, open, send, subscribe, resolve, sessions, dashboard, trace")
 		os.Exit(1)
 	}
 
@@ -146,6 +153,35 @@ func main() {
 		if err := runDashboard(client); err != nil {
 			logger.Error("dashboard error", "error", err)
 			os.Exit(1)
+		}
+
+	case "trace":
+		if len(args) < 2 {
+			fmt.Println("Usage: tailbus trace <trace-id>")
+			os.Exit(1)
+		}
+		resp, err := client.GetTrace(ctx, &agentpb.GetTraceRequest{TraceId: args[1]})
+		if err != nil {
+			logger.Error("get trace failed", "error", err)
+			os.Exit(1)
+		}
+		if len(resp.Spans) == 0 {
+			fmt.Println("No spans found for trace", args[1])
+			os.Exit(0)
+		}
+		fmt.Printf("Trace %s (%d spans):\n\n", args[1], len(resp.Spans))
+		for _, span := range resp.Spans {
+			ts := span.Timestamp.AsTime().Format("15:04:05.000")
+			action := span.Action.String()
+			meta := ""
+			if len(span.Metadata) > 0 {
+				var parts []string
+				for k, v := range span.Metadata {
+					parts = append(parts, k+"="+v)
+				}
+				meta = " " + fmt.Sprintf("%v", parts)
+			}
+			fmt.Printf("  %s  %-40s  msg:%s  node:%s%s\n", ts, action, short(span.MessageId), span.NodeId, meta)
 		}
 
 	default:

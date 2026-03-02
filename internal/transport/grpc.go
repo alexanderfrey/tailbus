@@ -20,6 +20,7 @@ type GRPCTransport struct {
 	logger    *slog.Logger
 	grpcSrv   *grpc.Server
 	receiveFn func(*messagepb.Envelope)
+	sendFn    func(*messagepb.Envelope)
 
 	mu    sync.RWMutex
 	peers map[string]*peerConn // addr -> peer connection
@@ -55,6 +56,11 @@ func (t *GRPCTransport) OnReceive(fn func(*messagepb.Envelope)) {
 	t.receiveFn = fn
 }
 
+// OnSend registers a callback invoked after a successful send to a peer.
+func (t *GRPCTransport) OnSend(fn func(*messagepb.Envelope)) {
+	t.sendFn = fn
+}
+
 // Send sends an envelope to a peer. Establishes connection lazily.
 func (t *GRPCTransport) Send(addr string, env *messagepb.Envelope) error {
 	pc, err := t.getOrConnect(addr)
@@ -82,7 +88,16 @@ func (t *GRPCTransport) Send(addr string, env *messagepb.Envelope) error {
 
 		pc2.mu.Lock()
 		defer pc2.mu.Unlock()
-		return pc2.stream.Send(env)
+		if err := pc2.stream.Send(env); err != nil {
+			return err
+		}
+		if t.sendFn != nil {
+			t.sendFn(env)
+		}
+		return nil
+	}
+	if t.sendFn != nil {
+		t.sendFn(env)
 	}
 	return nil
 }

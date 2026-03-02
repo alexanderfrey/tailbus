@@ -86,6 +86,7 @@ type Envelope struct {
 	ContentType   string                 `protobuf:"bytes,6,opt,name=content_type,json=contentType,proto3" json:"content_type,omitempty"`
 	SentAtUnix    int64                  `protobuf:"varint,7,opt,name=sent_at_unix,json=sentAtUnix,proto3" json:"sent_at_unix,omitempty"`
 	Type          EnvelopeType           `protobuf:"varint,8,opt,name=type,proto3,enum=tailbus.v1.EnvelopeType" json:"type,omitempty"`
+	TraceId       string                 `protobuf:"bytes,9,opt,name=trace_id,json=traceId,proto3" json:"trace_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -176,12 +177,19 @@ func (x *Envelope) GetType() EnvelopeType {
 	return EnvelopeType_ENVELOPE_TYPE_UNSPECIFIED
 }
 
+func (x *Envelope) GetTraceId() string {
+	if x != nil {
+		return x.TraceId
+	}
+	return ""
+}
+
 var File_tailbus_v1_messages_proto protoreflect.FileDescriptor
 
 const file_tailbus_v1_messages_proto_rawDesc = "" +
 	"\n" +
 	"\x19tailbus/v1/messages.proto\x12\n" +
-	"tailbus.v1\"\x93\x02\n" +
+	"tailbus.v1\"\xae\x02\n" +
 	"\bEnvelope\x12\x1d\n" +
 	"\n" +
 	"message_id\x18\x01 \x01(\tR\tmessageId\x12\x1d\n" +
@@ -194,7 +202,8 @@ const file_tailbus_v1_messages_proto_rawDesc = "" +
 	"\fcontent_type\x18\x06 \x01(\tR\vcontentType\x12 \n" +
 	"\fsent_at_unix\x18\a \x01(\x03R\n" +
 	"sentAtUnix\x12,\n" +
-	"\x04type\x18\b \x01(\x0e2\x18.tailbus.v1.EnvelopeTypeR\x04type*\xa2\x01\n" +
+	"\x04type\x18\b \x01(\x0e2\x18.tailbus.v1.EnvelopeTypeR\x04type\x12\x19\n" +
+	"\btrace_id\x18\t \x01(\tR\atraceId*\xa2\x01\n" +
 	"\fEnvelopeType\x12\x1d\n" +
 	"\x19ENVELOPE_TYPE_UNSPECIFIED\x10\x00\x12\x19\n" +
 	"\x15ENVELOPE_TYPE_MESSAGE\x10\x01\x12\x1e\n" +

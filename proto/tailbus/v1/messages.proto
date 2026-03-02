@@ -21,4 +21,5 @@ message Envelope {
   string content_type = 6;
   int64 sent_at_unix = 7;
   EnvelopeType type = 8;
+  string trace_id = 9;
 }

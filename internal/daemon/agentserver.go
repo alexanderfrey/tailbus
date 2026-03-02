@@ -15,6 +15,7 @@ import (
 	"github.com/alexanderfrey/tailbus/internal/session"
 	"github.com/alexanderfrey/tailbus/internal/transport"
 	"github.com/google/uuid"
+	"github.com/prometheus/client_golang/prometheus"
 	"google.golang.org/grpc"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
@@ -28,11 +29,13 @@ type Router interface {
 type AgentServer struct {
 	agentpb.UnimplementedAgentAPIServer
 
-	logger   *slog.Logger
-	sessions *session.Store
-	router   Router
-	grpc     *grpc.Server
-	activity *ActivityBus
+	logger     *slog.Logger
+	sessions   *session.Store
+	router     Router
+	grpc       *grpc.Server
+	activity   *ActivityBus
+	traceStore *TraceStore
+	metrics    *Metrics
 
 	mu              sync.RWMutex
 	handles         map[string]bool                          // registered handles on this node
@@ -69,6 +72,12 @@ func (s *AgentServer) SetDashboardDeps(nodeID string, resolver *handle.Resolver,
 	s.nodeID = nodeID
 	s.dashResolver = resolver
 	s.dashTransport = tp
+}
+
+// SetTracing sets the trace store and metrics for tracing support.
+func (s *AgentServer) SetTracing(ts *TraceStore, m *Metrics) {
+	s.traceStore = ts
+	s.metrics = m
 }
 
 // ServeUnix starts the gRPC server on a Unix socket.
@@ -136,6 +145,12 @@ func (s *AgentServer) DeliverToLocal(env *messagepb.Envelope) bool {
 		s.activity.MessagesDeliveredLocal.Add(1)
 	}
 
+	if s.traceStore != nil && env.TraceId != "" {
+		s.traceStore.RecordSpan(env.TraceId, env.MessageId, s.nodeID, agentpb.TraceAction_TRACE_ACTION_DELIVERED_TO_SUBSCRIBER, map[string]string{
+			"to": env.ToHandle,
+		})
+	}
+
 	return true
 }
 
@@ -177,6 +192,13 @@ func (s *AgentServer) Register(_ context.Context, req *agentpb.RegisterRequest) 
 // OpenSession opens a new session and sends the opening message.
 func (s *AgentServer) OpenSession(ctx context.Context, req *agentpb.OpenSessionRequest) (*agentpb.OpenSessionResponse, error) {
 	sess := session.New(req.FromHandle, req.ToHandle)
+
+	// Generate or use agent-provided trace ID
+	traceID := req.TraceId
+	if traceID == "" {
+		traceID = uuid.New().String()
+	}
+	sess.TraceID = traceID
 	s.sessions.Put(sess)
 
 	msgID := uuid.New().String()
@@ -189,6 +211,15 @@ func (s *AgentServer) OpenSession(ctx context.Context, req *agentpb.OpenSessionR
 		ContentType: req.ContentType,
 		SentAtUnix:  sess.CreatedAt.Unix(),
 		Type:        messagepb.EnvelopeType_ENVELOPE_TYPE_SESSION_OPEN,
+		TraceId:     traceID,
+	}
+
+	if s.traceStore != nil {
+		s.traceStore.RecordSpan(traceID, msgID, s.nodeID, agentpb.TraceAction_TRACE_ACTION_MESSAGE_CREATED, map[string]string{
+			"from": req.FromHandle,
+			"to":   req.ToHandle,
+			"type": "session_open",
+		})
 	}
 
 	if err := s.router.Route(ctx, env); err != nil {
@@ -199,8 +230,8 @@ func (s *AgentServer) OpenSession(ctx context.Context, req *agentpb.OpenSessionR
 		s.activity.EmitSessionOpened(sess.ID, req.FromHandle, req.ToHandle)
 	}
 
-	s.logger.Info("session opened", "session_id", sess.ID, "from", req.FromHandle, "to", req.ToHandle)
-	return &agentpb.OpenSessionResponse{SessionId: sess.ID, MessageId: msgID}, nil
+	s.logger.Info("session opened", "session_id", sess.ID, "from", req.FromHandle, "to", req.ToHandle, "trace_id", traceID)
+	return &agentpb.OpenSessionResponse{SessionId: sess.ID, MessageId: msgID, TraceId: traceID}, nil
 }
 
 // SendMessage sends a message within an existing session.
@@ -226,6 +257,15 @@ func (s *AgentServer) SendMessage(ctx context.Context, req *agentpb.SendMessageR
 		ContentType: req.ContentType,
 		SentAtUnix:  sess.UpdatedAt.Unix(),
 		Type:        messagepb.EnvelopeType_ENVELOPE_TYPE_MESSAGE,
+		TraceId:     sess.TraceID,
+	}
+
+	if s.traceStore != nil && sess.TraceID != "" {
+		s.traceStore.RecordSpan(sess.TraceID, msgID, s.nodeID, agentpb.TraceAction_TRACE_ACTION_MESSAGE_CREATED, map[string]string{
+			"from": req.FromHandle,
+			"to":   toHandle,
+			"type": "message",
+		})
 	}
 
 	if err := s.router.Route(ctx, env); err != nil {
@@ -289,14 +329,30 @@ func (s *AgentServer) ResolveSession(ctx context.Context, req *agentpb.ResolveSe
 		ContentType: req.ContentType,
 		SentAtUnix:  sess.UpdatedAt.Unix(),
 		Type:        messagepb.EnvelopeType_ENVELOPE_TYPE_SESSION_RESOLVE,
+		TraceId:     sess.TraceID,
+	}
+
+	if s.traceStore != nil && sess.TraceID != "" {
+		s.traceStore.RecordSpan(sess.TraceID, msgID, s.nodeID, agentpb.TraceAction_TRACE_ACTION_MESSAGE_CREATED, map[string]string{
+			"from": req.FromHandle,
+			"to":   toHandle,
+			"type": "session_resolve",
+		})
 	}
 
 	if err := s.router.Route(ctx, env); err != nil {
 		return nil, fmt.Errorf("route resolve: %w", err)
 	}
 
+	createdAt := sess.CreatedAt
 	if err := sess.Resolve(); err != nil {
 		return nil, err
+	}
+
+	// Observe session lifetime
+	if s.metrics != nil {
+		lifetime := sess.UpdatedAt.Sub(createdAt).Seconds()
+		(*s.metrics.SessionLifetime).(prometheus.Histogram).Observe(lifetime)
 	}
 
 	if s.activity != nil {
@@ -421,4 +477,13 @@ func (s *AgentServer) WatchActivity(_ *agentpb.WatchActivityRequest, stream agen
 			return stream.Context().Err()
 		}
 	}
+}
+
+// GetTrace returns trace spans for a given trace ID from the local node.
+func (s *AgentServer) GetTrace(_ context.Context, req *agentpb.GetTraceRequest) (*agentpb.GetTraceResponse, error) {
+	if s.traceStore == nil {
+		return &agentpb.GetTraceResponse{}, nil
+	}
+	spans := s.traceStore.GetTrace(req.TraceId)
+	return &agentpb.GetTraceResponse{Spans: spans}, nil
 }

@@ -22,6 +22,7 @@ type Session struct {
 	FromHandle string
 	ToHandle   string
 	State      State
+	TraceID    string
 	CreatedAt  time.Time
 	UpdatedAt  time.Time
 }

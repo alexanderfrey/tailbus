@@ -4,19 +4,25 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"time"
 
+	agentpb "github.com/alexanderfrey/tailbus/api/agentpb"
 	messagepb "github.com/alexanderfrey/tailbus/api/messagepb"
 	"github.com/alexanderfrey/tailbus/internal/handle"
 	"github.com/alexanderfrey/tailbus/internal/transport"
+	"github.com/prometheus/client_golang/prometheus"
 )
 
 // MessageRouter routes envelopes to local agents or remote daemons.
 type MessageRouter struct {
-	resolver  *handle.Resolver
-	transport transport.Transport
-	local     LocalDeliverer
-	logger    *slog.Logger
-	activity  *ActivityBus
+	resolver   *handle.Resolver
+	transport  transport.Transport
+	local      LocalDeliverer
+	logger     *slog.Logger
+	activity   *ActivityBus
+	traceStore *TraceStore
+	metrics    *Metrics
+	nodeID     string
 }
 
 // LocalDeliverer delivers messages to local agents.
@@ -36,14 +42,21 @@ func NewMessageRouter(resolver *handle.Resolver, transport transport.Transport, 
 	}
 }
 
+// SetTracing sets the trace store, metrics, and node ID for tracing support.
+func (r *MessageRouter) SetTracing(ts *TraceStore, m *Metrics, nodeID string) {
+	r.traceStore = ts
+	r.metrics = m
+	r.nodeID = nodeID
+}
+
 // Route routes an envelope to the appropriate destination.
 func (r *MessageRouter) Route(_ context.Context, env *messagepb.Envelope) error {
+	start := time.Now()
+
 	// Check if the destination is local
 	if r.local.HasHandle(env.ToHandle) {
 		if r.local.DeliverToLocal(env) {
-			if r.activity != nil {
-				r.activity.EmitMessageRouted(env.SessionId, env.FromHandle, env.ToHandle, false)
-			}
+			r.recordRouteDone(env, false, start)
 			return nil
 		}
 		return fmt.Errorf("handle %q is local but has no subscribers", env.ToHandle)
@@ -60,8 +73,29 @@ func (r *MessageRouter) Route(_ context.Context, env *messagepb.Envelope) error 
 		return err
 	}
 
-	if r.activity != nil {
-		r.activity.EmitMessageRouted(env.SessionId, env.FromHandle, env.ToHandle, true)
-	}
+	r.recordRouteDone(env, true, start)
 	return nil
+}
+
+func (r *MessageRouter) recordRouteDone(env *messagepb.Envelope, remote bool, start time.Time) {
+	duration := time.Since(start)
+
+	if r.activity != nil {
+		r.activity.EmitMessageRouted(env.SessionId, env.FromHandle, env.ToHandle, remote, env.TraceId, env.MessageId)
+	}
+
+	if r.metrics != nil {
+		(*r.metrics.MessageRoutingDuration).(prometheus.Histogram).Observe(duration.Seconds())
+	}
+
+	if r.traceStore != nil && env.TraceId != "" {
+		action := agentpb.TraceAction_TRACE_ACTION_ROUTED_LOCAL
+		if remote {
+			action = agentpb.TraceAction_TRACE_ACTION_ROUTED_REMOTE
+		}
+		r.traceStore.RecordSpan(env.TraceId, env.MessageId, r.nodeID, action, map[string]string{
+			"from": env.FromHandle,
+			"to":   env.ToHandle,
+		})
+	}
 }

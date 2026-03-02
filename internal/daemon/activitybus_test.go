@@ -102,9 +102,9 @@ func TestActivityBus_Counters(t *testing.T) {
 	bus.EmitSessionOpened("s1", "a", "b")
 	bus.EmitSessionOpened("s2", "c", "d")
 	bus.EmitSessionResolved("s1", "a")
-	bus.EmitMessageRouted("s1", "a", "b", false)
-	bus.EmitMessageRouted("s2", "c", "d", true)
-	bus.EmitMessageRouted("s2", "c", "d", true)
+	bus.EmitMessageRouted("s1", "a", "b", false, "t1", "m1")
+	bus.EmitMessageRouted("s2", "c", "d", true, "t2", "m2")
+	bus.EmitMessageRouted("s2", "c", "d", true, "t2", "m3")
 	bus.MessagesReceivedRemote.Add(3)
 
 	c := bus.Counters()

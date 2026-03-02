@@ -27,6 +27,7 @@ const (
 	AgentAPI_ListSessions_FullMethodName   = "/tailbus.v1.AgentAPI/ListSessions"
 	AgentAPI_GetNodeStatus_FullMethodName  = "/tailbus.v1.AgentAPI/GetNodeStatus"
 	AgentAPI_WatchActivity_FullMethodName  = "/tailbus.v1.AgentAPI/WatchActivity"
+	AgentAPI_GetTrace_FullMethodName       = "/tailbus.v1.AgentAPI/GetTrace"
 )
 
 // AgentAPIClient is the client API for AgentAPI service.
@@ -41,6 +42,7 @@ type AgentAPIClient interface {
 	ListSessions(ctx context.Context, in *ListSessionsRequest, opts ...grpc.CallOption) (*ListSessionsResponse, error)
 	GetNodeStatus(ctx context.Context, in *GetNodeStatusRequest, opts ...grpc.CallOption) (*GetNodeStatusResponse, error)
 	WatchActivity(ctx context.Context, in *WatchActivityRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[ActivityEvent], error)
+	GetTrace(ctx context.Context, in *GetTraceRequest, opts ...grpc.CallOption) (*GetTraceResponse, error)
 }
 
 type agentAPIClient struct {
@@ -149,6 +151,16 @@ func (c *agentAPIClient) WatchActivity(ctx context.Context, in *WatchActivityReq
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
 type AgentAPI_WatchActivityClient = grpc.ServerStreamingClient[ActivityEvent]
 
+func (c *agentAPIClient) GetTrace(ctx context.Context, in *GetTraceRequest, opts ...grpc.CallOption) (*GetTraceResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetTraceResponse)
+	err := c.cc.Invoke(ctx, AgentAPI_GetTrace_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // AgentAPIServer is the server API for AgentAPI service.
 // All implementations must embed UnimplementedAgentAPIServer
 // for forward compatibility.
@@ -161,6 +173,7 @@ type AgentAPIServer interface {
 	ListSessions(context.Context, *ListSessionsRequest) (*ListSessionsResponse, error)
 	GetNodeStatus(context.Context, *GetNodeStatusRequest) (*GetNodeStatusResponse, error)
 	WatchActivity(*WatchActivityRequest, grpc.ServerStreamingServer[ActivityEvent]) error
+	GetTrace(context.Context, *GetTraceRequest) (*GetTraceResponse, error)
 	mustEmbedUnimplementedAgentAPIServer()
 }
 
@@ -194,6 +207,9 @@ func (UnimplementedAgentAPIServer) GetNodeStatus(context.Context, *GetNodeStatus
 }
 func (UnimplementedAgentAPIServer) WatchActivity(*WatchActivityRequest, grpc.ServerStreamingServer[ActivityEvent]) error {
 	return status.Error(codes.Unimplemented, "method WatchActivity not implemented")
+}
+func (UnimplementedAgentAPIServer) GetTrace(context.Context, *GetTraceRequest) (*GetTraceResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetTrace not implemented")
 }
 func (UnimplementedAgentAPIServer) mustEmbedUnimplementedAgentAPIServer() {}
 func (UnimplementedAgentAPIServer) testEmbeddedByValue()                  {}
@@ -346,6 +362,24 @@ func _AgentAPI_WatchActivity_Handler(srv interface{}, stream grpc.ServerStream) 
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
 type AgentAPI_WatchActivityServer = grpc.ServerStreamingServer[ActivityEvent]
 
+func _AgentAPI_GetTrace_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetTraceRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AgentAPIServer).GetTrace(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: AgentAPI_GetTrace_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AgentAPIServer).GetTrace(ctx, req.(*GetTraceRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // AgentAPI_ServiceDesc is the grpc.ServiceDesc for AgentAPI service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -376,6 +410,10 @@ var AgentAPI_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "GetNodeStatus",
 			Handler:    _AgentAPI_GetNodeStatus_Handler,
+		},
+		{
+			MethodName: "GetTrace",
+			Handler:    _AgentAPI_GetTrace_Handler,
 		},
 	},
 	Streams: []grpc.StreamDesc{

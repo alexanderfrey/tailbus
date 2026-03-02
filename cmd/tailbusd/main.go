@@ -21,6 +21,7 @@ func main() {
 	listenAddr := flag.String("listen", ":9443", "P2P listen address")
 	socketPath := flag.String("socket", "/tmp/tailbusd.sock", "Unix socket path")
 	keyFile := flag.String("key", "", "path to node key file")
+	metricsAddr := flag.String("metrics", ":9090", "Prometheus metrics listen address (empty to disable)")
 	flag.Parse()
 
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelInfo}))
@@ -40,6 +41,7 @@ func main() {
 		cfg.ListenAddr = *listenAddr
 		cfg.SocketPath = *socketPath
 		cfg.KeyFile = *keyFile
+		cfg.MetricsAddr = *metricsAddr
 	}
 
 	if cfg.NodeID == "" {

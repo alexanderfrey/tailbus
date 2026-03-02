@@ -7,6 +7,7 @@ import (
 	"net"
 	"time"
 
+	agentpb "github.com/alexanderfrey/tailbus/api/agentpb"
 	messagepb "github.com/alexanderfrey/tailbus/api/messagepb"
 	"github.com/alexanderfrey/tailbus/internal/config"
 	"github.com/alexanderfrey/tailbus/internal/handle"
@@ -27,6 +28,8 @@ type Daemon struct {
 	transport   *transport.GRPCTransport
 	router      *MessageRouter
 	activity    *ActivityBus
+	traceStore  *TraceStore
+	metrics     *Metrics
 }
 
 // New creates a new daemon from config.
@@ -43,27 +46,41 @@ func New(cfg *config.DaemonConfig, logger *slog.Logger) (*Daemon, error) {
 	tp := transport.NewGRPCTransport(logger)
 
 	activity := NewActivityBus()
+	traceStore := NewTraceStore(10000)
+	metrics := NewMetrics(activity)
 
 	d := &Daemon{
-		cfg:       cfg,
-		logger:    logger,
-		keypair:   kp,
-		resolver:  resolver,
-		sessions:  sessions,
-		transport: tp,
-		activity:  activity,
+		cfg:        cfg,
+		logger:     logger,
+		keypair:    kp,
+		resolver:   resolver,
+		sessions:   sessions,
+		transport:  tp,
+		activity:   activity,
+		traceStore: traceStore,
+		metrics:    metrics,
 	}
 
 	// Agent server needs router, but router needs agent server (for local delivery).
 	// Create agent server first with nil router, then set router.
 	agentSrv := NewAgentServer(sessions, nil, activity, logger)
+	agentSrv.SetTracing(traceStore, metrics)
 	router := NewMessageRouter(resolver, tp, agentSrv, activity, logger)
+	router.SetTracing(traceStore, metrics, cfg.NodeID)
 	agentSrv.router = router
 	d.agentServer = agentSrv
 	d.router = router
 
-	// Set up transport to deliver received envelopes through the agent server
+	// Set up transport callbacks
+	tp.OnSend(func(env *messagepb.Envelope) {
+		if traceStore != nil && env.TraceId != "" {
+			traceStore.RecordSpan(env.TraceId, env.MessageId, cfg.NodeID, agentpb.TraceAction_TRACE_ACTION_SENT_TO_TRANSPORT, nil)
+		}
+	})
 	tp.OnReceive(func(env *messagepb.Envelope) {
+		if traceStore != nil && env.TraceId != "" {
+			traceStore.RecordSpan(env.TraceId, env.MessageId, cfg.NodeID, agentpb.TraceAction_TRACE_ACTION_RECEIVED_FROM_TRANSPORT, nil)
+		}
 		agentSrv.DeliverToLocal(env)
 		activity.MessagesReceivedRemote.Add(1)
 	})
@@ -126,10 +143,16 @@ func (d *Daemon) Run(ctx context.Context) error {
 	// Heartbeat in background
 	go cc.Heartbeat(ctx, d.agentServer.GetHandles, 30*time.Second)
 
+	// Start metrics server if configured
+	if d.cfg.MetricsAddr != "" {
+		go d.metrics.Serve(ctx, d.cfg.MetricsAddr, d.logger)
+	}
+
 	d.logger.Info("daemon running",
 		"node_id", d.cfg.NodeID,
 		"p2p_addr", d.cfg.ListenAddr,
 		"socket", d.cfg.SocketPath,
+		"metrics", d.cfg.MetricsAddr,
 	)
 
 	<-ctx.Done()
@@ -142,4 +165,9 @@ func (d *Daemon) Run(ctx context.Context) error {
 // AgentServer returns the agent server (used for testing).
 func (d *Daemon) AgentServer() *AgentServer {
 	return d.agentServer
+}
+
+// TraceStore returns the trace store (used for testing).
+func (d *Daemon) TraceStore() *TraceStore {
+	return d.traceStore
 }

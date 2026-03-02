@@ -16,6 +16,7 @@ service AgentAPI {
   rpc ListSessions(ListSessionsRequest) returns (ListSessionsResponse);
   rpc GetNodeStatus(GetNodeStatusRequest) returns (GetNodeStatusResponse);
   rpc WatchActivity(WatchActivityRequest) returns (stream ActivityEvent);
+  rpc GetTrace(GetTraceRequest) returns (GetTraceResponse);
 }
 
 message RegisterRequest {
@@ -32,11 +33,13 @@ message OpenSessionRequest {
   string to_handle = 2;
   bytes payload = 3;
   string content_type = 4;
+  string trace_id = 5;
 }
 
 message OpenSessionResponse {
   string session_id = 1;
   string message_id = 2;
+  string trace_id = 3;
 }
 
 message SendMessageRequest {
@@ -137,6 +140,8 @@ message MessageRoutedEvent {
   string from_handle = 2;
   string to_handle = 3;
   bool remote = 4;
+  string trace_id = 5;
+  string message_id = 6;
 }
 
 message SessionOpenedEvent {
@@ -152,4 +157,33 @@ message SessionResolvedEvent {
 
 message HandleRegisteredEvent {
   string handle = 1;
+}
+
+// --- Tracing ---
+
+enum TraceAction {
+  TRACE_ACTION_UNSPECIFIED = 0;
+  TRACE_ACTION_MESSAGE_CREATED = 1;
+  TRACE_ACTION_ROUTED_LOCAL = 2;
+  TRACE_ACTION_ROUTED_REMOTE = 3;
+  TRACE_ACTION_SENT_TO_TRANSPORT = 4;
+  TRACE_ACTION_RECEIVED_FROM_TRANSPORT = 5;
+  TRACE_ACTION_DELIVERED_TO_SUBSCRIBER = 6;
+}
+
+message TraceSpan {
+  string trace_id = 1;
+  string message_id = 2;
+  string node_id = 3;
+  TraceAction action = 4;
+  google.protobuf.Timestamp timestamp = 5;
+  map<string, string> metadata = 6;
+}
+
+message GetTraceRequest {
+  string trace_id = 1;
+}
+
+message GetTraceResponse {
+  repeated TraceSpan spans = 1;
 }

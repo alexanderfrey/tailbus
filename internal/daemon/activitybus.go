@@ -75,7 +75,7 @@ func (b *ActivityBus) Counters() *agentpb.Counters {
 
 // Helper methods to emit typed events.
 
-func (b *ActivityBus) EmitMessageRouted(sessionID, from, to string, remote bool) {
+func (b *ActivityBus) EmitMessageRouted(sessionID, from, to string, remote bool, traceID, messageID string) {
 	b.MessagesRouted.Add(1)
 	if remote {
 		b.MessagesSentRemote.Add(1)
@@ -90,6 +90,8 @@ func (b *ActivityBus) EmitMessageRouted(sessionID, from, to string, remote bool)
 				FromHandle: from,
 				ToHandle:   to,
 				Remote:     remote,
+				TraceId:    traceID,
+				MessageId:  messageID,
 			},
 		},
 	})
