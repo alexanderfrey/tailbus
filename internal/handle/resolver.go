@@ -32,6 +32,17 @@ func (r *Resolver) UpdatePeerMap(entries map[string]PeerInfo) {
 	r.handleTo = entries
 }
 
+// GetPeerMap returns a snapshot of the cached peer map.
+func (r *Resolver) GetPeerMap() map[string]PeerInfo {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	result := make(map[string]PeerInfo, len(r.handleTo))
+	for k, v := range r.handleTo {
+		result[k] = v
+	}
+	return result
+}
+
 // Resolve looks up a handle in the cached peer map.
 func (r *Resolver) Resolve(handle string) (PeerInfo, error) {
 	r.mu.RLock()

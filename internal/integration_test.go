@@ -68,13 +68,17 @@ func TestEndToEnd(t *testing.T) {
 	sessions1 := session.NewStore()
 	sessions2 := session.NewStore()
 
+	// --- Create activity buses ---
+	activity1 := daemon.NewActivityBus()
+	activity2 := daemon.NewActivityBus()
+
 	// --- Create agent servers with routers ---
-	agentSrv1 := daemon.NewAgentServer(sessions1, nil, logger.With("component", "agent-1"))
-	router1 := daemon.NewMessageRouter(resolver1, tp1, agentSrv1, logger.With("component", "router-1"))
+	agentSrv1 := daemon.NewAgentServer(sessions1, nil, activity1, logger.With("component", "agent-1"))
+	router1 := daemon.NewMessageRouter(resolver1, tp1, agentSrv1, activity1, logger.With("component", "router-1"))
 	agentSrv1.SetRouter(router1)
 
-	agentSrv2 := daemon.NewAgentServer(sessions2, nil, logger.With("component", "agent-2"))
-	router2 := daemon.NewMessageRouter(resolver2, tp2, agentSrv2, logger.With("component", "router-2"))
+	agentSrv2 := daemon.NewAgentServer(sessions2, nil, activity2, logger.With("component", "agent-2"))
+	router2 := daemon.NewMessageRouter(resolver2, tp2, agentSrv2, activity2, logger.With("component", "router-2"))
 	agentSrv2.SetRouter(router2)
 
 	// Wire transport receive to local delivery
@@ -273,6 +277,38 @@ func TestEndToEnd(t *testing.T) {
 	if sessResp.Sessions[0].State != "resolved" {
 		t.Errorf("session state = %q, want resolved", sessResp.Sessions[0].State)
 	}
+
+	// --- Verify GetNodeStatus ---
+	statusResp, err := agent1.GetNodeStatus(ctx, &agentpb.GetNodeStatusRequest{})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Should have our registered handle
+	if len(statusResp.Handles) != 1 {
+		t.Fatalf("expected 1 handle, got %d", len(statusResp.Handles))
+	}
+	if statusResp.Handles[0].Name != "marketing" {
+		t.Errorf("handle name = %q, want marketing", statusResp.Handles[0].Name)
+	}
+
+	// Should have sessions
+	if len(statusResp.Sessions) == 0 {
+		t.Error("expected at least 1 session in status")
+	}
+
+	// Should have counters from activity bus
+	if statusResp.Counters == nil {
+		t.Fatal("expected counters in status")
+	}
+	if statusResp.Counters.SessionsOpened == 0 {
+		t.Error("expected sessions_opened > 0")
+	}
+	if statusResp.Counters.MessagesRouted == 0 {
+		t.Error("expected messages_routed > 0")
+	}
+	t.Logf("Node status: handles=%d sessions=%d msgs_routed=%d",
+		len(statusResp.Handles), len(statusResp.Sessions), statusResp.Counters.MessagesRouted)
 
 	t.Log("End-to-end test passed!")
 }

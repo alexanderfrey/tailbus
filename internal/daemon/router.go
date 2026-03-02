@@ -16,6 +16,7 @@ type MessageRouter struct {
 	transport transport.Transport
 	local     LocalDeliverer
 	logger    *slog.Logger
+	activity  *ActivityBus
 }
 
 // LocalDeliverer delivers messages to local agents.
@@ -25,12 +26,13 @@ type LocalDeliverer interface {
 }
 
 // NewMessageRouter creates a new message router.
-func NewMessageRouter(resolver *handle.Resolver, transport transport.Transport, local LocalDeliverer, logger *slog.Logger) *MessageRouter {
+func NewMessageRouter(resolver *handle.Resolver, transport transport.Transport, local LocalDeliverer, activity *ActivityBus, logger *slog.Logger) *MessageRouter {
 	return &MessageRouter{
 		resolver:  resolver,
 		transport: transport,
 		local:     local,
 		logger:    logger,
+		activity:  activity,
 	}
 }
 
@@ -39,6 +41,9 @@ func (r *MessageRouter) Route(_ context.Context, env *messagepb.Envelope) error 
 	// Check if the destination is local
 	if r.local.HasHandle(env.ToHandle) {
 		if r.local.DeliverToLocal(env) {
+			if r.activity != nil {
+				r.activity.EmitMessageRouted(env.SessionId, env.FromHandle, env.ToHandle, false)
+			}
 			return nil
 		}
 		return fmt.Errorf("handle %q is local but has no subscribers", env.ToHandle)
@@ -51,5 +56,12 @@ func (r *MessageRouter) Route(_ context.Context, env *messagepb.Envelope) error 
 	}
 
 	r.logger.Debug("routing to remote peer", "handle", env.ToHandle, "peer", peer.NodeID, "addr", peer.AdvertiseAddr)
-	return r.transport.Send(peer.AdvertiseAddr, env)
+	if err := r.transport.Send(peer.AdvertiseAddr, env); err != nil {
+		return err
+	}
+
+	if r.activity != nil {
+		r.activity.EmitMessageRouted(env.SessionId, env.FromHandle, env.ToHandle, true)
+	}
+	return nil
 }

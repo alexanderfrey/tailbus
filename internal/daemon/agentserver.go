@@ -7,12 +7,16 @@ import (
 	"net"
 	"os"
 	"sync"
+	"time"
 
 	agentpb "github.com/alexanderfrey/tailbus/api/agentpb"
 	messagepb "github.com/alexanderfrey/tailbus/api/messagepb"
+	"github.com/alexanderfrey/tailbus/internal/handle"
 	"github.com/alexanderfrey/tailbus/internal/session"
+	"github.com/alexanderfrey/tailbus/internal/transport"
 	"github.com/google/uuid"
 	"google.golang.org/grpc"
+	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
 // Router is the interface the agent server uses to send outbound messages.
@@ -28,27 +32,43 @@ type AgentServer struct {
 	sessions *session.Store
 	router   Router
 	grpc     *grpc.Server
+	activity *ActivityBus
 
 	mu              sync.RWMutex
 	handles         map[string]bool                          // registered handles on this node
 	subscribers     map[string][]chan *agentpb.IncomingMessage // handle -> subscriber channels
 	onHandleChange  func(handles []string)                   // called when handles change
+
+	// Dashboard dependencies (set via SetDashboardDeps)
+	dashResolver  *handle.Resolver
+	dashTransport *transport.GRPCTransport
+	nodeID        string
+	startedAt     time.Time
 }
 
 // NewAgentServer creates a new agent server.
-func NewAgentServer(sessions *session.Store, router Router, logger *slog.Logger) *AgentServer {
+func NewAgentServer(sessions *session.Store, router Router, activity *ActivityBus, logger *slog.Logger) *AgentServer {
 	s := &AgentServer{
 		logger:      logger,
 		sessions:    sessions,
 		router:      router,
+		activity:    activity,
 		handles:     make(map[string]bool),
 		subscribers: make(map[string][]chan *agentpb.IncomingMessage),
+		startedAt:   time.Now(),
 	}
 
 	gs := grpc.NewServer()
 	agentpb.RegisterAgentAPIServer(gs, s)
 	s.grpc = gs
 	return s
+}
+
+// SetDashboardDeps sets dependencies needed for dashboard RPCs.
+func (s *AgentServer) SetDashboardDeps(nodeID string, resolver *handle.Resolver, tp *transport.GRPCTransport) {
+	s.nodeID = nodeID
+	s.dashResolver = resolver
+	s.dashTransport = tp
 }
 
 // ServeUnix starts the gRPC server on a Unix socket.
@@ -111,6 +131,11 @@ func (s *AgentServer) DeliverToLocal(env *messagepb.Envelope) bool {
 			s.logger.Warn("subscriber channel full, dropping message", "handle", env.ToHandle)
 		}
 	}
+
+	if s.activity != nil {
+		s.activity.MessagesDeliveredLocal.Add(1)
+	}
+
 	return true
 }
 
@@ -132,6 +157,10 @@ func (s *AgentServer) Register(_ context.Context, req *agentpb.RegisterRequest) 
 
 	s.handles[req.Handle] = true
 	s.logger.Info("agent registered", "handle", req.Handle)
+
+	if s.activity != nil {
+		s.activity.EmitHandleRegistered(req.Handle)
+	}
 
 	// Notify coord about handle change (must copy handles while holding lock)
 	if s.onHandleChange != nil {
@@ -164,6 +193,10 @@ func (s *AgentServer) OpenSession(ctx context.Context, req *agentpb.OpenSessionR
 
 	if err := s.router.Route(ctx, env); err != nil {
 		return nil, fmt.Errorf("route session open: %w", err)
+	}
+
+	if s.activity != nil {
+		s.activity.EmitSessionOpened(sess.ID, req.FromHandle, req.ToHandle)
 	}
 
 	s.logger.Info("session opened", "session_id", sess.ID, "from", req.FromHandle, "to", req.ToHandle)
@@ -266,6 +299,10 @@ func (s *AgentServer) ResolveSession(ctx context.Context, req *agentpb.ResolveSe
 		return nil, err
 	}
 
+	if s.activity != nil {
+		s.activity.EmitSessionResolved(req.SessionId, req.FromHandle)
+	}
+
 	s.logger.Info("session resolved", "session_id", req.SessionId)
 	return &agentpb.ResolveSessionResponse{MessageId: msgID}, nil
 }
@@ -285,4 +322,103 @@ func (s *AgentServer) ListSessions(_ context.Context, req *agentpb.ListSessionsR
 		})
 	}
 	return &agentpb.ListSessionsResponse{Sessions: infos}, nil
+}
+
+// GetNodeStatus returns a snapshot of the node's current state for the dashboard.
+func (s *AgentServer) GetNodeStatus(_ context.Context, _ *agentpb.GetNodeStatusRequest) (*agentpb.GetNodeStatusResponse, error) {
+	s.mu.RLock()
+	// Build handle infos with subscriber counts
+	var handles []*agentpb.HandleInfo
+	for h := range s.handles {
+		handles = append(handles, &agentpb.HandleInfo{
+			Name:            h,
+			SubscriberCount: int32(len(s.subscribers[h])),
+		})
+	}
+	s.mu.RUnlock()
+
+	// Build session infos
+	allSessions := s.sessions.ListAll()
+	var sessInfos []*agentpb.SessionInfo
+	for _, sess := range allSessions {
+		sessInfos = append(sessInfos, &agentpb.SessionInfo{
+			SessionId:     sess.ID,
+			FromHandle:    sess.FromHandle,
+			ToHandle:      sess.ToHandle,
+			State:         string(sess.State),
+			CreatedAtUnix: sess.CreatedAt.Unix(),
+			UpdatedAtUnix: sess.UpdatedAt.Unix(),
+		})
+	}
+
+	// Build peer statuses from resolver + transport
+	var peers []*agentpb.PeerStatus
+	if s.dashResolver != nil {
+		peerMap := s.dashResolver.GetPeerMap()
+		// Group handles by node
+		nodeHandles := make(map[string][]string)
+		nodeInfo := make(map[string]*agentpb.PeerStatus)
+		for h, info := range peerMap {
+			if _, ok := nodeInfo[info.NodeID]; !ok {
+				nodeInfo[info.NodeID] = &agentpb.PeerStatus{
+					NodeId:        info.NodeID,
+					AdvertiseAddr: info.AdvertiseAddr,
+				}
+			}
+			nodeHandles[info.NodeID] = append(nodeHandles[info.NodeID], h)
+		}
+
+		// Check which addrs are connected
+		connectedAddrs := make(map[string]bool)
+		if s.dashTransport != nil {
+			for _, addr := range s.dashTransport.ConnectedAddrs() {
+				connectedAddrs[addr] = true
+			}
+		}
+
+		for nodeID, status := range nodeInfo {
+			status.Handles = nodeHandles[nodeID]
+			status.Connected = connectedAddrs[status.AdvertiseAddr]
+			peers = append(peers, status)
+		}
+	}
+
+	// Get counters
+	var counters *agentpb.Counters
+	if s.activity != nil {
+		counters = s.activity.Counters()
+	}
+
+	return &agentpb.GetNodeStatusResponse{
+		NodeId:    s.nodeID,
+		StartedAt: timestamppb.New(s.startedAt),
+		Handles:   handles,
+		Peers:     peers,
+		Sessions:  sessInfos,
+		Counters:  counters,
+	}, nil
+}
+
+// WatchActivity streams activity events to the dashboard.
+func (s *AgentServer) WatchActivity(_ *agentpb.WatchActivityRequest, stream agentpb.AgentAPI_WatchActivityServer) error {
+	if s.activity == nil {
+		return fmt.Errorf("activity bus not configured")
+	}
+
+	ch := s.activity.Subscribe()
+	defer s.activity.Unsubscribe(ch)
+
+	for {
+		select {
+		case event, ok := <-ch:
+			if !ok {
+				return nil
+			}
+			if err := stream.Send(event); err != nil {
+				return err
+			}
+		case <-stream.Context().Done():
+			return stream.Context().Err()
+		}
+	}
 }

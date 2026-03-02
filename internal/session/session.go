@@ -77,6 +77,17 @@ func (s *Store) Get(id string) (*Session, bool) {
 	return sess, ok
 }
 
+// ListAll returns all sessions.
+func (s *Store) ListAll() []*Session {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	result := make([]*Session, 0, len(s.sessions))
+	for _, sess := range s.sessions {
+		result = append(result, sess)
+	}
+	return result
+}
+
 // ListByHandle returns all sessions involving a handle (as from or to).
 func (s *Store) ListByHandle(handle string) []*Session {
 	s.mu.RLock()

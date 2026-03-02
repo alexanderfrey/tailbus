@@ -25,6 +25,8 @@ const (
 	AgentAPI_Subscribe_FullMethodName      = "/tailbus.v1.AgentAPI/Subscribe"
 	AgentAPI_ResolveSession_FullMethodName = "/tailbus.v1.AgentAPI/ResolveSession"
 	AgentAPI_ListSessions_FullMethodName   = "/tailbus.v1.AgentAPI/ListSessions"
+	AgentAPI_GetNodeStatus_FullMethodName  = "/tailbus.v1.AgentAPI/GetNodeStatus"
+	AgentAPI_WatchActivity_FullMethodName  = "/tailbus.v1.AgentAPI/WatchActivity"
 )
 
 // AgentAPIClient is the client API for AgentAPI service.
@@ -37,6 +39,8 @@ type AgentAPIClient interface {
 	Subscribe(ctx context.Context, in *SubscribeRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[IncomingMessage], error)
 	ResolveSession(ctx context.Context, in *ResolveSessionRequest, opts ...grpc.CallOption) (*ResolveSessionResponse, error)
 	ListSessions(ctx context.Context, in *ListSessionsRequest, opts ...grpc.CallOption) (*ListSessionsResponse, error)
+	GetNodeStatus(ctx context.Context, in *GetNodeStatusRequest, opts ...grpc.CallOption) (*GetNodeStatusResponse, error)
+	WatchActivity(ctx context.Context, in *WatchActivityRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[ActivityEvent], error)
 }
 
 type agentAPIClient struct {
@@ -116,6 +120,35 @@ func (c *agentAPIClient) ListSessions(ctx context.Context, in *ListSessionsReque
 	return out, nil
 }
 
+func (c *agentAPIClient) GetNodeStatus(ctx context.Context, in *GetNodeStatusRequest, opts ...grpc.CallOption) (*GetNodeStatusResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetNodeStatusResponse)
+	err := c.cc.Invoke(ctx, AgentAPI_GetNodeStatus_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *agentAPIClient) WatchActivity(ctx context.Context, in *WatchActivityRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[ActivityEvent], error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	stream, err := c.cc.NewStream(ctx, &AgentAPI_ServiceDesc.Streams[1], AgentAPI_WatchActivity_FullMethodName, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	x := &grpc.GenericClientStream[WatchActivityRequest, ActivityEvent]{ClientStream: stream}
+	if err := x.ClientStream.SendMsg(in); err != nil {
+		return nil, err
+	}
+	if err := x.ClientStream.CloseSend(); err != nil {
+		return nil, err
+	}
+	return x, nil
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type AgentAPI_WatchActivityClient = grpc.ServerStreamingClient[ActivityEvent]
+
 // AgentAPIServer is the server API for AgentAPI service.
 // All implementations must embed UnimplementedAgentAPIServer
 // for forward compatibility.
@@ -126,6 +159,8 @@ type AgentAPIServer interface {
 	Subscribe(*SubscribeRequest, grpc.ServerStreamingServer[IncomingMessage]) error
 	ResolveSession(context.Context, *ResolveSessionRequest) (*ResolveSessionResponse, error)
 	ListSessions(context.Context, *ListSessionsRequest) (*ListSessionsResponse, error)
+	GetNodeStatus(context.Context, *GetNodeStatusRequest) (*GetNodeStatusResponse, error)
+	WatchActivity(*WatchActivityRequest, grpc.ServerStreamingServer[ActivityEvent]) error
 	mustEmbedUnimplementedAgentAPIServer()
 }
 
@@ -153,6 +188,12 @@ func (UnimplementedAgentAPIServer) ResolveSession(context.Context, *ResolveSessi
 }
 func (UnimplementedAgentAPIServer) ListSessions(context.Context, *ListSessionsRequest) (*ListSessionsResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method ListSessions not implemented")
+}
+func (UnimplementedAgentAPIServer) GetNodeStatus(context.Context, *GetNodeStatusRequest) (*GetNodeStatusResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetNodeStatus not implemented")
+}
+func (UnimplementedAgentAPIServer) WatchActivity(*WatchActivityRequest, grpc.ServerStreamingServer[ActivityEvent]) error {
+	return status.Error(codes.Unimplemented, "method WatchActivity not implemented")
 }
 func (UnimplementedAgentAPIServer) mustEmbedUnimplementedAgentAPIServer() {}
 func (UnimplementedAgentAPIServer) testEmbeddedByValue()                  {}
@@ -276,6 +317,35 @@ func _AgentAPI_ListSessions_Handler(srv interface{}, ctx context.Context, dec fu
 	return interceptor(ctx, in, info, handler)
 }
 
+func _AgentAPI_GetNodeStatus_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetNodeStatusRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AgentAPIServer).GetNodeStatus(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: AgentAPI_GetNodeStatus_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AgentAPIServer).GetNodeStatus(ctx, req.(*GetNodeStatusRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _AgentAPI_WatchActivity_Handler(srv interface{}, stream grpc.ServerStream) error {
+	m := new(WatchActivityRequest)
+	if err := stream.RecvMsg(m); err != nil {
+		return err
+	}
+	return srv.(AgentAPIServer).WatchActivity(m, &grpc.GenericServerStream[WatchActivityRequest, ActivityEvent]{ServerStream: stream})
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type AgentAPI_WatchActivityServer = grpc.ServerStreamingServer[ActivityEvent]
+
 // AgentAPI_ServiceDesc is the grpc.ServiceDesc for AgentAPI service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -303,11 +373,20 @@ var AgentAPI_ServiceDesc = grpc.ServiceDesc{
 			MethodName: "ListSessions",
 			Handler:    _AgentAPI_ListSessions_Handler,
 		},
+		{
+			MethodName: "GetNodeStatus",
+			Handler:    _AgentAPI_GetNodeStatus_Handler,
+		},
 	},
 	Streams: []grpc.StreamDesc{
 		{
 			StreamName:    "Subscribe",
 			Handler:       _AgentAPI_Subscribe_Handler,
+			ServerStreams: true,
+		},
+		{
+			StreamName:    "WatchActivity",
+			Handler:       _AgentAPI_WatchActivity_Handler,
 			ServerStreams: true,
 		},
 	},

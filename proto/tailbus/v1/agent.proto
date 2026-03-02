@@ -5,6 +5,7 @@ package tailbus.v1;
 option go_package = "github.com/alexanderfrey/tailbus/api/agentpb";
 
 import "tailbus/v1/messages.proto";
+import "google/protobuf/timestamp.proto";
 
 service AgentAPI {
   rpc Register(RegisterRequest) returns (RegisterResponse);
@@ -13,6 +14,8 @@ service AgentAPI {
   rpc Subscribe(SubscribeRequest) returns (stream IncomingMessage);
   rpc ResolveSession(ResolveSessionRequest) returns (ResolveSessionResponse);
   rpc ListSessions(ListSessionsRequest) returns (ListSessionsResponse);
+  rpc GetNodeStatus(GetNodeStatusRequest) returns (GetNodeStatusResponse);
+  rpc WatchActivity(WatchActivityRequest) returns (stream ActivityEvent);
 }
 
 message RegisterRequest {
@@ -81,4 +84,72 @@ message SessionInfo {
   string state = 4;
   int64 created_at_unix = 5;
   int64 updated_at_unix = 6;
+}
+
+// --- Dashboard RPCs ---
+
+message GetNodeStatusRequest {}
+
+message GetNodeStatusResponse {
+  string node_id = 1;
+  google.protobuf.Timestamp started_at = 2;
+  repeated HandleInfo handles = 3;
+  repeated PeerStatus peers = 4;
+  repeated SessionInfo sessions = 5;
+  Counters counters = 6;
+}
+
+message HandleInfo {
+  string name = 1;
+  int32 subscriber_count = 2;
+}
+
+message PeerStatus {
+  string node_id = 1;
+  string advertise_addr = 2;
+  repeated string handles = 3;
+  bool connected = 4;
+}
+
+message Counters {
+  int64 messages_routed = 1;
+  int64 messages_delivered_local = 2;
+  int64 messages_sent_remote = 3;
+  int64 messages_received_remote = 4;
+  int64 sessions_opened = 5;
+  int64 sessions_resolved = 6;
+}
+
+message WatchActivityRequest {}
+
+message ActivityEvent {
+  google.protobuf.Timestamp timestamp = 1;
+  oneof event {
+    MessageRoutedEvent message_routed = 2;
+    SessionOpenedEvent session_opened = 3;
+    SessionResolvedEvent session_resolved = 4;
+    HandleRegisteredEvent handle_registered = 5;
+  }
+}
+
+message MessageRoutedEvent {
+  string session_id = 1;
+  string from_handle = 2;
+  string to_handle = 3;
+  bool remote = 4;
+}
+
+message SessionOpenedEvent {
+  string session_id = 1;
+  string from_handle = 2;
+  string to_handle = 3;
+}
+
+message SessionResolvedEvent {
+  string session_id = 1;
+  string from_handle = 2;
+}
+
+message HandleRegisteredEvent {
+  string handle = 1;
 }

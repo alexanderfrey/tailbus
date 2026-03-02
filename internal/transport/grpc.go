@@ -159,6 +159,17 @@ func (t *GRPCTransport) Exchange(stream transportpb.NodeTransport_ExchangeServer
 	}
 }
 
+// ConnectedAddrs returns the list of currently connected peer addresses.
+func (t *GRPCTransport) ConnectedAddrs() []string {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+	addrs := make([]string, 0, len(t.peers))
+	for addr := range t.peers {
+		addrs = append(addrs, addr)
+	}
+	return addrs
+}
+
 // Close shuts down the transport.
 func (t *GRPCTransport) Close() error {
 	// Close peer connections first so streams end

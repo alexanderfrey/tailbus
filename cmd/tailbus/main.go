@@ -21,7 +21,7 @@ func main() {
 	args := flag.Args()
 	if len(args) == 0 {
 		fmt.Println("Usage: tailbus [command] [args...]")
-		fmt.Println("Commands: register, open, send, subscribe, resolve, sessions")
+		fmt.Println("Commands: register, open, send, subscribe, resolve, sessions, dashboard")
 		os.Exit(1)
 	}
 
@@ -140,6 +140,12 @@ func main() {
 		}
 		for _, s := range resp.Sessions {
 			fmt.Printf("  %s  %s -> %s  [%s]\n", s.SessionId[:8], s.FromHandle, s.ToHandle, s.State)
+		}
+
+	case "dashboard":
+		if err := runDashboard(client); err != nil {
+			logger.Error("dashboard error", "error", err)
+			os.Exit(1)
 		}
 
 	default:

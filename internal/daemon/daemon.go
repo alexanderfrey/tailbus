@@ -26,6 +26,7 @@ type Daemon struct {
 	agentServer *AgentServer
 	transport   *transport.GRPCTransport
 	router      *MessageRouter
+	activity    *ActivityBus
 }
 
 // New creates a new daemon from config.
@@ -41,19 +42,22 @@ func New(cfg *config.DaemonConfig, logger *slog.Logger) (*Daemon, error) {
 	// Create transport
 	tp := transport.NewGRPCTransport(logger)
 
+	activity := NewActivityBus()
+
 	d := &Daemon{
-		cfg:      cfg,
-		logger:   logger,
-		keypair:  kp,
-		resolver: resolver,
-		sessions: sessions,
+		cfg:       cfg,
+		logger:    logger,
+		keypair:   kp,
+		resolver:  resolver,
+		sessions:  sessions,
 		transport: tp,
+		activity:  activity,
 	}
 
 	// Agent server needs router, but router needs agent server (for local delivery).
 	// Create agent server first with nil router, then set router.
-	agentSrv := NewAgentServer(sessions, nil, logger)
-	router := NewMessageRouter(resolver, tp, agentSrv, logger)
+	agentSrv := NewAgentServer(sessions, nil, activity, logger)
+	router := NewMessageRouter(resolver, tp, agentSrv, activity, logger)
 	agentSrv.router = router
 	d.agentServer = agentSrv
 	d.router = router
@@ -61,6 +65,7 @@ func New(cfg *config.DaemonConfig, logger *slog.Logger) (*Daemon, error) {
 	// Set up transport to deliver received envelopes through the agent server
 	tp.OnReceive(func(env *messagepb.Envelope) {
 		agentSrv.DeliverToLocal(env)
+		activity.MessagesReceivedRemote.Add(1)
 	})
 
 	return d, nil
@@ -68,6 +73,9 @@ func New(cfg *config.DaemonConfig, logger *slog.Logger) (*Daemon, error) {
 
 // Run starts the daemon and blocks until the context is cancelled.
 func (d *Daemon) Run(ctx context.Context) error {
+	// Wire dashboard dependencies
+	d.agentServer.SetDashboardDeps(d.cfg.NodeID, d.resolver, d.transport)
+
 	// Connect to coord server
 	cc, err := NewCoordClient(d.cfg.CoordAddr, d.cfg.NodeID, d.keypair.Public, d.cfg.AdvertiseAddr, d.resolver, d.logger)
 	if err != nil {
