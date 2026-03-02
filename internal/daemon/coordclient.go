@@ -42,12 +42,13 @@ func NewCoordClient(coordAddr, nodeID string, pubKey []byte, advertiseAddr strin
 }
 
 // Register registers this node with the coordination server.
-func (c *CoordClient) Register(ctx context.Context, handles []string) error {
+func (c *CoordClient) Register(ctx context.Context, handles []string, descriptions map[string]string) error {
 	resp, err := c.client.RegisterNode(ctx, &pb.RegisterNodeRequest{
-		NodeId:        c.nodeID,
-		PublicKey:     c.pubKey,
-		AdvertiseAddr: c.addr,
-		Handles:       handles,
+		NodeId:              c.nodeID,
+		PublicKey:           c.pubKey,
+		AdvertiseAddr:       c.addr,
+		Handles:             handles,
+		HandleDescriptions:  descriptions,
 	})
 	if err != nil {
 		return fmt.Errorf("register node: %w", err)
@@ -75,12 +76,15 @@ func (c *CoordClient) WatchPeerMap(ctx context.Context) error {
 
 		entries := make(map[string]handle.PeerInfo)
 		for _, p := range update.Peers {
-			info := handle.PeerInfo{
-				NodeID:        p.NodeId,
-				PublicKey:     p.PublicKey,
-				AdvertiseAddr: p.AdvertiseAddr,
-			}
 			for _, h := range p.Handles {
+				info := handle.PeerInfo{
+					NodeID:        p.NodeId,
+					PublicKey:     p.PublicKey,
+					AdvertiseAddr: p.AdvertiseAddr,
+				}
+				if p.HandleDescriptions != nil {
+					info.Description = p.HandleDescriptions[h]
+				}
 				entries[h] = info
 			}
 		}
@@ -91,7 +95,7 @@ func (c *CoordClient) WatchPeerMap(ctx context.Context) error {
 
 // Heartbeat sends periodic heartbeats to the coordination server.
 // Blocks until the context is cancelled.
-func (c *CoordClient) Heartbeat(ctx context.Context, getHandles func() []string, interval time.Duration) {
+func (c *CoordClient) Heartbeat(ctx context.Context, getHandles func() []string, getDescriptions func() map[string]string, interval time.Duration) {
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 
@@ -101,9 +105,11 @@ func (c *CoordClient) Heartbeat(ctx context.Context, getHandles func() []string,
 			return
 		case <-ticker.C:
 			handles := getHandles()
+			descriptions := getDescriptions()
 			_, err := c.client.Heartbeat(ctx, &pb.HeartbeatRequest{
-				NodeId:  c.nodeID,
-				Handles: handles,
+				NodeId:             c.nodeID,
+				Handles:            handles,
+				HandleDescriptions: descriptions,
 			})
 			if err != nil {
 				c.logger.Error("heartbeat failed", "error", err)

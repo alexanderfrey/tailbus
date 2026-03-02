@@ -102,13 +102,13 @@ func (d *Daemon) Run(ctx context.Context) error {
 	defer cc.Close()
 
 	// Register with coord
-	if err := cc.Register(ctx, nil); err != nil {
+	if err := cc.Register(ctx, nil, nil); err != nil {
 		return fmt.Errorf("register with coord: %w", err)
 	}
 
 	// When local handles change, re-register with coord so peer map updates immediately
-	d.agentServer.SetOnHandleChange(func(handles []string) {
-		if err := cc.Register(ctx, handles); err != nil {
+	d.agentServer.SetOnHandleChange(func(handles []string, descriptions map[string]string) {
+		if err := cc.Register(ctx, handles, descriptions); err != nil {
 			d.logger.Error("failed to re-register handles with coord", "error", err)
 		}
 	})
@@ -141,7 +141,7 @@ func (d *Daemon) Run(ctx context.Context) error {
 	}()
 
 	// Heartbeat in background
-	go cc.Heartbeat(ctx, d.agentServer.GetHandles, 30*time.Second)
+	go cc.Heartbeat(ctx, d.agentServer.GetHandles, d.agentServer.GetDescriptions, 30*time.Second)
 
 	// Start metrics server if configured
 	if d.cfg.MetricsAddr != "" {

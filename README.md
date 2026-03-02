@@ -24,6 +24,8 @@ Think of it as **Slack for autonomous agents** — agents register handles, open
 ## Features
 
 - **Handle-based addressing** — agents register names like `marketing`, `sales`, `planner` and message each other without knowing which node they're on
+- **Handle descriptions** — agents register with a description string; any agent can query it via `DescribeHandle` RPC or `tailbus describe <handle>`
+- **@-mention auto-routing** — when a `text/*` message contains `@handle`, the daemon automatically opens a new session to each mentioned handle
 - **Session lifecycle** — structured conversations with open / message / resolve states
 - **P2P data plane** — messages flow directly between daemons via bidirectional gRPC streams, not through the coord server
 - **Distributed message tracing** — every session gets a `trace_id`; spans are recorded at each hop (created, routed, sent, received, delivered)
@@ -189,6 +191,7 @@ tailbus [flags] <command> [args]
 | Command | Usage | Description |
 |---------|-------|-------------|
 | `register` | `register <handle>` | Register an agent handle on the local node |
+| `describe` | `describe <handle>` | Show the description for a handle |
 | `open` | `open <from> <to> <message>` | Open a new session with an initial message |
 | `send` | `send <session-id> <from> <message>` | Send a message within an existing session |
 | `subscribe` | `subscribe <handle>` | Stream incoming messages (blocks until Ctrl-C) |
@@ -344,7 +347,8 @@ The `tailbus agent` subcommand provides a **JSON-lines stdio bridge** so any pro
 **Inbound (stdin)** — one JSON object per line:
 
 ```jsonl
-{"type":"register","handle":"marketing"}
+{"type":"register","handle":"marketing","description":"Marketing team agent"}
+{"type":"describe","handle":"sales"}
 {"type":"open","to":"sales","payload":"Need Q4 numbers"}
 {"type":"open","to":"sales","payload":"{}","content_type":"application/json","trace_id":"my-id"}
 {"type":"send","session":"<id>","payload":"Q4 revenue: $1.2M"}
@@ -354,6 +358,8 @@ The `tailbus agent` subcommand provides a **JSON-lines stdio bridge** so any pro
 ```
 
 - `register` must be the first command (one registration per process)
+- `description` on `register` is optional — describes what the handle offers
+- `describe` can be sent at any time (no registration required)
 - `content_type` defaults to `text/plain` if omitted
 - `trace_id` on `open` is optional (auto-generated if omitted)
 - `payload` on `resolve` is optional
@@ -362,6 +368,7 @@ The `tailbus agent` subcommand provides a **JSON-lines stdio bridge** so any pro
 
 ```jsonl
 {"type":"registered","handle":"marketing"}
+{"type":"described","handle":"sales","description":"Sales team agent","found":true}
 {"type":"opened","session":"<id>","message_id":"<id>","trace_id":"<id>"}
 {"type":"sent","message_id":"<id>"}
 {"type":"resolved","message_id":"<id>"}
@@ -393,6 +400,29 @@ def send(cmd):
 print(send({"type": "register", "handle": "my-python-agent"}))
 print(send({"type": "open", "to": "sales", "payload": "hello from python"}))
 ```
+
+## @-Mention Auto-Routing
+
+When a `text/*` message contains `@handle` patterns, the daemon automatically opens new sessions from the sender to each mentioned handle. This enables Twitter-style routing:
+
+```bash
+# Register two agents
+./bin/tailbus -socket /tmp/tailbusd-1.sock register marketing
+./bin/tailbus -socket /tmp/tailbusd-1.sock register sales
+
+# Subscribe to incoming messages
+./bin/tailbus -socket /tmp/tailbusd-1.sock subscribe sales &
+
+# Send a message mentioning @sales — a new session is auto-opened to sales
+./bin/tailbus -socket /tmp/tailbusd-1.sock open marketing planner "@sales can you send Q4 numbers?"
+# sales subscriber receives a session_open with the full message
+```
+
+Rules:
+- Only `text/*` content types are scanned for mentions
+- The sender (`fromHandle`) and direct recipient (`toHandle`) are excluded from mention scanning
+- Each mention opens an independent session with the original payload
+- Mention routing is best-effort: failures are logged but never block the primary message
 
 ## Building External Agents
 

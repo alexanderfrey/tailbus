@@ -37,11 +37,12 @@ func (pm *PeerMap) Build() (*pb.PeerMapUpdate, error) {
 	var peers []*pb.PeerInfo
 	for _, n := range nodes {
 		peers = append(peers, &pb.PeerInfo{
-			NodeId:            n.NodeID,
-			PublicKey:         n.PublicKey,
-			AdvertiseAddr:     n.AdvertiseAddr,
-			Handles:           n.Handles,
-			LastHeartbeatUnix: n.LastHeartbeat.Unix(),
+			NodeId:              n.NodeID,
+			PublicKey:           n.PublicKey,
+			AdvertiseAddr:       n.AdvertiseAddr,
+			Handles:             n.Handles,
+			LastHeartbeatUnix:   n.LastHeartbeat.Unix(),
+			HandleDescriptions:  n.HandleDescriptions,
 		})
 	}
 

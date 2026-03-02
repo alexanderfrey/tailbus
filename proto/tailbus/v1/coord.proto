@@ -16,6 +16,7 @@ message RegisterNodeRequest {
   bytes public_key = 2;
   string advertise_addr = 3;
   repeated string handles = 4;
+  map<string, string> handle_descriptions = 5;
 }
 
 message RegisterNodeResponse {
@@ -38,6 +39,7 @@ message PeerInfo {
   string advertise_addr = 3;
   repeated string handles = 4;
   int64 last_heartbeat_unix = 5;
+  map<string, string> handle_descriptions = 6;
 }
 
 message LookupHandleRequest {
@@ -52,6 +54,7 @@ message LookupHandleResponse {
 message HeartbeatRequest {
   string node_id = 1;
   repeated string handles = 2;
+  map<string, string> handle_descriptions = 3;
 }
 
 message HeartbeatResponse {

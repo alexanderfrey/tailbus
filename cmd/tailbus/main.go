@@ -28,7 +28,7 @@ func main() {
 	args := flag.Args()
 	if len(args) == 0 {
 		fmt.Println("Usage: tailbus [command] [args...]")
-		fmt.Println("Commands: register, open, send, subscribe, resolve, sessions, dashboard, trace, agent")
+		fmt.Println("Commands: register, describe, open, send, subscribe, resolve, sessions, dashboard, trace, agent")
 		os.Exit(1)
 	}
 
@@ -58,6 +58,26 @@ func main() {
 			os.Exit(1)
 		}
 		fmt.Printf("Registered as %q\n", args[1])
+
+	case "describe":
+		if len(args) < 2 {
+			fmt.Println("Usage: tailbus describe <handle>")
+			os.Exit(1)
+		}
+		resp, err := client.DescribeHandle(ctx, &agentpb.DescribeHandleRequest{Handle: args[1]})
+		if err != nil {
+			logger.Error("describe failed", "error", err)
+			os.Exit(1)
+		}
+		if !resp.Found {
+			fmt.Printf("Handle %q not found\n", args[1])
+			os.Exit(1)
+		}
+		if resp.Description == "" {
+			fmt.Printf("%s: (no description)\n", resp.Handle)
+		} else {
+			fmt.Printf("%s: %s\n", resp.Handle, resp.Description)
+		}
 
 	case "open":
 		if len(args) < 4 {

@@ -10,6 +10,7 @@ type PeerInfo struct {
 	NodeID        string
 	PublicKey     []byte
 	AdvertiseAddr string
+	Description   string
 }
 
 // Resolver resolves handle names to peer info using a cached peer map.
@@ -52,4 +53,15 @@ func (r *Resolver) Resolve(handle string) (PeerInfo, error) {
 		return PeerInfo{}, fmt.Errorf("handle %q not found in peer map", handle)
 	}
 	return info, nil
+}
+
+// GetDescription returns the description for a handle, if known.
+func (r *Resolver) GetDescription(handle string) (string, bool) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	info, ok := r.handleTo[handle]
+	if !ok {
+		return "", false
+	}
+	return info.Description, true
 }

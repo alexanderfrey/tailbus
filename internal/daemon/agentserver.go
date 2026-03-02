@@ -6,6 +6,8 @@ import (
 	"log/slog"
 	"net"
 	"os"
+	"regexp"
+	"strings"
 	"sync"
 	"time"
 
@@ -39,8 +41,9 @@ type AgentServer struct {
 
 	mu              sync.RWMutex
 	handles         map[string]bool                          // registered handles on this node
+	descriptions    map[string]string                        // handle -> description
 	subscribers     map[string][]chan *agentpb.IncomingMessage // handle -> subscriber channels
-	onHandleChange  func(handles []string)                   // called when handles change
+	onHandleChange  func(handles []string, descriptions map[string]string) // called when handles change
 
 	// Dashboard dependencies (set via SetDashboardDeps)
 	dashResolver  *handle.Resolver
@@ -52,13 +55,14 @@ type AgentServer struct {
 // NewAgentServer creates a new agent server.
 func NewAgentServer(sessions *session.Store, router Router, activity *ActivityBus, logger *slog.Logger) *AgentServer {
 	s := &AgentServer{
-		logger:      logger,
-		sessions:    sessions,
-		router:      router,
-		activity:    activity,
-		handles:     make(map[string]bool),
-		subscribers: make(map[string][]chan *agentpb.IncomingMessage),
-		startedAt:   time.Now(),
+		logger:       logger,
+		sessions:     sessions,
+		router:       router,
+		activity:     activity,
+		handles:      make(map[string]bool),
+		descriptions: make(map[string]string),
+		subscribers:  make(map[string][]chan *agentpb.IncomingMessage),
+		startedAt:    time.Now(),
 	}
 
 	gs := grpc.NewServer()
@@ -102,7 +106,7 @@ func (s *AgentServer) SetRouter(r Router) {
 }
 
 // SetOnHandleChange sets a callback invoked when local handles change.
-func (s *AgentServer) SetOnHandleChange(fn func(handles []string)) {
+func (s *AgentServer) SetOnHandleChange(fn func(handles []string, descriptions map[string]string)) {
 	s.onHandleChange = fn
 }
 
@@ -171,19 +175,26 @@ func (s *AgentServer) Register(_ context.Context, req *agentpb.RegisterRequest) 
 	}
 
 	s.handles[req.Handle] = true
+	if req.Description != "" {
+		s.descriptions[req.Handle] = req.Description
+	}
 	s.logger.Info("agent registered", "handle", req.Handle)
 
 	if s.activity != nil {
 		s.activity.EmitHandleRegistered(req.Handle)
 	}
 
-	// Notify coord about handle change (must copy handles while holding lock)
+	// Notify coord about handle change (must copy handles+descriptions while holding lock)
 	if s.onHandleChange != nil {
 		handles := make([]string, 0, len(s.handles))
 		for h := range s.handles {
 			handles = append(handles, h)
 		}
-		go s.onHandleChange(handles)
+		descs := make(map[string]string, len(s.descriptions))
+		for h, d := range s.descriptions {
+			descs[h] = d
+		}
+		go s.onHandleChange(handles, descs)
 	}
 
 	return &agentpb.RegisterResponse{Ok: true}, nil
@@ -230,6 +241,9 @@ func (s *AgentServer) OpenSession(ctx context.Context, req *agentpb.OpenSessionR
 		s.activity.EmitSessionOpened(sess.ID, req.FromHandle, req.ToHandle)
 	}
 
+	// Check for @-mentions in the opening payload
+	s.maybeRouteMentions(ctx, req.FromHandle, req.ToHandle, req.ContentType, req.Payload)
+
 	s.logger.Info("session opened", "session_id", sess.ID, "from", req.FromHandle, "to", req.ToHandle, "trace_id", traceID)
 	return &agentpb.OpenSessionResponse{SessionId: sess.ID, MessageId: msgID, TraceId: traceID}, nil
 }
@@ -271,6 +285,9 @@ func (s *AgentServer) SendMessage(ctx context.Context, req *agentpb.SendMessageR
 	if err := s.router.Route(ctx, env); err != nil {
 		return nil, fmt.Errorf("route message: %w", err)
 	}
+
+	// Check for @-mentions
+	s.maybeRouteMentions(ctx, req.FromHandle, toHandle, req.ContentType, req.Payload)
 
 	return &agentpb.SendMessageResponse{MessageId: msgID}, nil
 }
@@ -344,6 +361,9 @@ func (s *AgentServer) ResolveSession(ctx context.Context, req *agentpb.ResolveSe
 		return nil, fmt.Errorf("route resolve: %w", err)
 	}
 
+	// Check for @-mentions in the resolve payload
+	s.maybeRouteMentions(ctx, req.FromHandle, toHandle, req.ContentType, req.Payload)
+
 	createdAt := sess.CreatedAt
 	if err := sess.Resolve(); err != nil {
 		return nil, err
@@ -383,12 +403,13 @@ func (s *AgentServer) ListSessions(_ context.Context, req *agentpb.ListSessionsR
 // GetNodeStatus returns a snapshot of the node's current state for the dashboard.
 func (s *AgentServer) GetNodeStatus(_ context.Context, _ *agentpb.GetNodeStatusRequest) (*agentpb.GetNodeStatusResponse, error) {
 	s.mu.RLock()
-	// Build handle infos with subscriber counts
+	// Build handle infos with subscriber counts and descriptions
 	var handles []*agentpb.HandleInfo
 	for h := range s.handles {
 		handles = append(handles, &agentpb.HandleInfo{
 			Name:            h,
 			SubscriberCount: int32(len(s.subscribers[h])),
+			Description:     s.descriptions[h],
 		})
 	}
 	s.mu.RUnlock()
@@ -486,4 +507,101 @@ func (s *AgentServer) GetTrace(_ context.Context, req *agentpb.GetTraceRequest) 
 	}
 	spans := s.traceStore.GetTrace(req.TraceId)
 	return &agentpb.GetTraceResponse{Spans: spans}, nil
+}
+
+// GetDescriptions returns a snapshot of all handle descriptions.
+func (s *AgentServer) GetDescriptions() map[string]string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	result := make(map[string]string, len(s.descriptions))
+	for h, d := range s.descriptions {
+		result[h] = d
+	}
+	return result
+}
+
+// DescribeHandle returns the description for a handle.
+func (s *AgentServer) DescribeHandle(_ context.Context, req *agentpb.DescribeHandleRequest) (*agentpb.DescribeHandleResponse, error) {
+	// Check local descriptions first
+	s.mu.RLock()
+	desc, ok := s.descriptions[req.Handle]
+	s.mu.RUnlock()
+	if ok {
+		return &agentpb.DescribeHandleResponse{Handle: req.Handle, Description: desc, Found: true}, nil
+	}
+
+	// Fall back to resolver (covers remote handles)
+	if s.dashResolver != nil {
+		if d, found := s.dashResolver.GetDescription(req.Handle); found {
+			return &agentpb.DescribeHandleResponse{Handle: req.Handle, Description: d, Found: true}, nil
+		}
+	}
+
+	return &agentpb.DescribeHandleResponse{Handle: req.Handle, Found: false}, nil
+}
+
+// --- @-mention auto-routing ---
+
+var mentionRe = regexp.MustCompile(`@([a-z][a-z0-9_-]*)`)
+
+// extractMentions returns unique handle names from @handle patterns, excluding the skip set.
+func extractMentions(text string, skip map[string]bool) []string {
+	matches := mentionRe.FindAllStringSubmatch(text, -1)
+	seen := make(map[string]bool, len(matches))
+	var result []string
+	for _, m := range matches {
+		h := m[1]
+		if skip[h] || seen[h] {
+			continue
+		}
+		seen[h] = true
+		result = append(result, h)
+	}
+	return result
+}
+
+// openMentionSession creates a new session from fromHandle to the mentioned handle
+// and routes the opening message. Best-effort: logs warnings on failure.
+func (s *AgentServer) openMentionSession(ctx context.Context, fromHandle, mentionedHandle string, payload []byte, contentType string) {
+	sess := session.New(fromHandle, mentionedHandle)
+	sess.TraceID = uuid.New().String()
+	s.sessions.Put(sess)
+
+	msgID := uuid.New().String()
+	env := &messagepb.Envelope{
+		MessageId:   msgID,
+		SessionId:   sess.ID,
+		FromHandle:  fromHandle,
+		ToHandle:    mentionedHandle,
+		Payload:     payload,
+		ContentType: contentType,
+		SentAtUnix:  sess.CreatedAt.Unix(),
+		Type:        messagepb.EnvelopeType_ENVELOPE_TYPE_SESSION_OPEN,
+		TraceId:     sess.TraceID,
+	}
+
+	if err := s.router.Route(ctx, env); err != nil {
+		s.logger.Warn("@-mention session route failed", "from", fromHandle, "to", mentionedHandle, "error", err)
+		return
+	}
+
+	if s.activity != nil {
+		s.activity.EmitSessionOpened(sess.ID, fromHandle, mentionedHandle)
+	}
+
+	s.logger.Info("@-mention session opened", "session_id", sess.ID, "from", fromHandle, "to", mentionedHandle)
+}
+
+// maybeRouteMentions scans a message payload for @-mentions and opens sessions to each.
+func (s *AgentServer) maybeRouteMentions(ctx context.Context, fromHandle, toHandle, contentType string, payload []byte) {
+	if !strings.HasPrefix(contentType, "text/") {
+		return
+	}
+
+	skip := map[string]bool{fromHandle: true, toHandle: true}
+	mentions := extractMentions(string(payload), skip)
+	for _, m := range mentions {
+		mentioned := m // capture
+		go s.openMentionSession(ctx, fromHandle, mentioned, payload, contentType)
+	}
 }

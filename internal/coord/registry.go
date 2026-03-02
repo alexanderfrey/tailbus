@@ -19,7 +19,7 @@ func NewRegistry(store *Store, logger *slog.Logger) *Registry {
 
 // RegisterNode registers a node and its handles. Returns an error if any handle is
 // already claimed by a different node.
-func (r *Registry) RegisterNode(nodeID string, pubKey []byte, addr string, handles []string) error {
+func (r *Registry) RegisterNode(nodeID string, pubKey []byte, addr string, handles []string, descriptions map[string]string) error {
 	// Check for handle conflicts
 	for _, h := range handles {
 		rec, err := r.store.LookupHandle(h)
@@ -32,11 +32,12 @@ func (r *Registry) RegisterNode(nodeID string, pubKey []byte, addr string, handl
 	}
 
 	rec := &NodeRecord{
-		NodeID:        nodeID,
-		PublicKey:     pubKey,
-		AdvertiseAddr: addr,
-		Handles:       handles,
-		LastHeartbeat: time.Now(),
+		NodeID:             nodeID,
+		PublicKey:          pubKey,
+		AdvertiseAddr:      addr,
+		Handles:            handles,
+		HandleDescriptions: descriptions,
+		LastHeartbeat:      time.Now(),
 	}
 	if err := r.store.UpsertNode(rec); err != nil {
 		return fmt.Errorf("upsert node: %w", err)
@@ -47,8 +48,8 @@ func (r *Registry) RegisterNode(nodeID string, pubKey []byte, addr string, handl
 }
 
 // Heartbeat updates a node's heartbeat timestamp and handles.
-func (r *Registry) Heartbeat(nodeID string, handles []string) error {
-	return r.store.UpdateHeartbeat(nodeID, handles)
+func (r *Registry) Heartbeat(nodeID string, handles []string, descriptions map[string]string) error {
+	return r.store.UpdateHeartbeat(nodeID, handles, descriptions)
 }
 
 // LookupHandle looks up which node serves a handle.

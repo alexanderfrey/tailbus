@@ -20,6 +20,7 @@ const _ = grpc.SupportPackageIsVersion9
 
 const (
 	AgentAPI_Register_FullMethodName       = "/tailbus.v1.AgentAPI/Register"
+	AgentAPI_DescribeHandle_FullMethodName = "/tailbus.v1.AgentAPI/DescribeHandle"
 	AgentAPI_OpenSession_FullMethodName    = "/tailbus.v1.AgentAPI/OpenSession"
 	AgentAPI_SendMessage_FullMethodName    = "/tailbus.v1.AgentAPI/SendMessage"
 	AgentAPI_Subscribe_FullMethodName      = "/tailbus.v1.AgentAPI/Subscribe"
@@ -35,6 +36,7 @@ const (
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 type AgentAPIClient interface {
 	Register(ctx context.Context, in *RegisterRequest, opts ...grpc.CallOption) (*RegisterResponse, error)
+	DescribeHandle(ctx context.Context, in *DescribeHandleRequest, opts ...grpc.CallOption) (*DescribeHandleResponse, error)
 	OpenSession(ctx context.Context, in *OpenSessionRequest, opts ...grpc.CallOption) (*OpenSessionResponse, error)
 	SendMessage(ctx context.Context, in *SendMessageRequest, opts ...grpc.CallOption) (*SendMessageResponse, error)
 	Subscribe(ctx context.Context, in *SubscribeRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[IncomingMessage], error)
@@ -57,6 +59,16 @@ func (c *agentAPIClient) Register(ctx context.Context, in *RegisterRequest, opts
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(RegisterResponse)
 	err := c.cc.Invoke(ctx, AgentAPI_Register_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *agentAPIClient) DescribeHandle(ctx context.Context, in *DescribeHandleRequest, opts ...grpc.CallOption) (*DescribeHandleResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(DescribeHandleResponse)
+	err := c.cc.Invoke(ctx, AgentAPI_DescribeHandle_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -166,6 +178,7 @@ func (c *agentAPIClient) GetTrace(ctx context.Context, in *GetTraceRequest, opts
 // for forward compatibility.
 type AgentAPIServer interface {
 	Register(context.Context, *RegisterRequest) (*RegisterResponse, error)
+	DescribeHandle(context.Context, *DescribeHandleRequest) (*DescribeHandleResponse, error)
 	OpenSession(context.Context, *OpenSessionRequest) (*OpenSessionResponse, error)
 	SendMessage(context.Context, *SendMessageRequest) (*SendMessageResponse, error)
 	Subscribe(*SubscribeRequest, grpc.ServerStreamingServer[IncomingMessage]) error
@@ -186,6 +199,9 @@ type UnimplementedAgentAPIServer struct{}
 
 func (UnimplementedAgentAPIServer) Register(context.Context, *RegisterRequest) (*RegisterResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method Register not implemented")
+}
+func (UnimplementedAgentAPIServer) DescribeHandle(context.Context, *DescribeHandleRequest) (*DescribeHandleResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method DescribeHandle not implemented")
 }
 func (UnimplementedAgentAPIServer) OpenSession(context.Context, *OpenSessionRequest) (*OpenSessionResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method OpenSession not implemented")
@@ -246,6 +262,24 @@ func _AgentAPI_Register_Handler(srv interface{}, ctx context.Context, dec func(i
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(AgentAPIServer).Register(ctx, req.(*RegisterRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _AgentAPI_DescribeHandle_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(DescribeHandleRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AgentAPIServer).DescribeHandle(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: AgentAPI_DescribeHandle_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AgentAPIServer).DescribeHandle(ctx, req.(*DescribeHandleRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -390,6 +424,10 @@ var AgentAPI_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "Register",
 			Handler:    _AgentAPI_Register_Handler,
+		},
+		{
+			MethodName: "DescribeHandle",
+			Handler:    _AgentAPI_DescribeHandle_Handler,
 		},
 		{
 			MethodName: "OpenSession",

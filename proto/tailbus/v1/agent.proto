@@ -9,6 +9,7 @@ import "google/protobuf/timestamp.proto";
 
 service AgentAPI {
   rpc Register(RegisterRequest) returns (RegisterResponse);
+  rpc DescribeHandle(DescribeHandleRequest) returns (DescribeHandleResponse);
   rpc OpenSession(OpenSessionRequest) returns (OpenSessionResponse);
   rpc SendMessage(SendMessageRequest) returns (SendMessageResponse);
   rpc Subscribe(SubscribeRequest) returns (stream IncomingMessage);
@@ -21,6 +22,17 @@ service AgentAPI {
 
 message RegisterRequest {
   string handle = 1;
+  string description = 2;
+}
+
+message DescribeHandleRequest {
+  string handle = 1;
+}
+
+message DescribeHandleResponse {
+  string handle = 1;
+  string description = 2;
+  bool found = 3;
 }
 
 message RegisterResponse {
@@ -105,6 +117,7 @@ message GetNodeStatusResponse {
 message HandleInfo {
   string name = 1;
   int32 subscriber_count = 2;
+  string description = 3;
 }
 
 message PeerStatus {

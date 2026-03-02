@@ -10,11 +10,12 @@ import (
 
 // NodeRecord represents a registered node in the database.
 type NodeRecord struct {
-	NodeID        string
-	PublicKey     []byte
-	AdvertiseAddr string
-	Handles       []string
-	LastHeartbeat time.Time
+	NodeID             string
+	PublicKey          []byte
+	AdvertiseAddr      string
+	Handles            []string
+	HandleDescriptions map[string]string
+	LastHeartbeat      time.Time
 }
 
 // Store provides SQLite persistence for the coordination server.
@@ -46,10 +47,16 @@ func (s *Store) migrate() error {
 		);
 		CREATE TABLE IF NOT EXISTS handles (
 			handle TEXT PRIMARY KEY,
-			node_id TEXT NOT NULL REFERENCES nodes(node_id) ON DELETE CASCADE
+			node_id TEXT NOT NULL REFERENCES nodes(node_id) ON DELETE CASCADE,
+			description TEXT NOT NULL DEFAULT ''
 		);
 	`)
-	return err
+	if err != nil {
+		return err
+	}
+	// Additive migration for existing databases.
+	s.db.Exec("ALTER TABLE handles ADD COLUMN description TEXT NOT NULL DEFAULT ''")
+	return nil
 }
 
 // UpsertNode inserts or updates a node record and its handles.
@@ -78,9 +85,13 @@ func (s *Store) UpsertNode(rec *NodeRecord) error {
 		return err
 	}
 
-	// Insert new handles
+	// Insert new handles with descriptions
 	for _, h := range rec.Handles {
-		_, err = tx.Exec("INSERT INTO handles (handle, node_id) VALUES (?, ?)", h, rec.NodeID)
+		desc := ""
+		if rec.HandleDescriptions != nil {
+			desc = rec.HandleDescriptions[h]
+		}
+		_, err = tx.Exec("INSERT INTO handles (handle, node_id, description) VALUES (?, ?, ?)", h, rec.NodeID, desc)
 		if err != nil {
 			return fmt.Errorf("register handle %q: %w", h, err)
 		}
@@ -90,7 +101,7 @@ func (s *Store) UpsertNode(rec *NodeRecord) error {
 }
 
 // UpdateHeartbeat updates the heartbeat timestamp and handles for a node.
-func (s *Store) UpdateHeartbeat(nodeID string, handles []string) error {
+func (s *Store) UpdateHeartbeat(nodeID string, handles []string, descriptions map[string]string) error {
 	tx, err := s.db.Begin()
 	if err != nil {
 		return err
@@ -112,7 +123,11 @@ func (s *Store) UpdateHeartbeat(nodeID string, handles []string) error {
 		return err
 	}
 	for _, h := range handles {
-		_, err = tx.Exec("INSERT OR REPLACE INTO handles (handle, node_id) VALUES (?, ?)", h, nodeID)
+		desc := ""
+		if descriptions != nil {
+			desc = descriptions[h]
+		}
+		_, err = tx.Exec("INSERT OR REPLACE INTO handles (handle, node_id, description) VALUES (?, ?, ?)", h, nodeID, desc)
 		if err != nil {
 			return err
 		}
@@ -142,19 +157,25 @@ func (s *Store) GetAllNodes() ([]*NodeRecord, error) {
 		nodes = append(nodes, &rec)
 	}
 
-	// Load handles
-	hrows, err := s.db.Query("SELECT handle, node_id FROM handles")
+	// Load handles with descriptions
+	hrows, err := s.db.Query("SELECT handle, node_id, description FROM handles")
 	if err != nil {
 		return nil, err
 	}
 	defer hrows.Close()
 	for hrows.Next() {
-		var handle, nodeID string
-		if err := hrows.Scan(&handle, &nodeID); err != nil {
+		var handle, nodeID, desc string
+		if err := hrows.Scan(&handle, &nodeID, &desc); err != nil {
 			return nil, err
 		}
 		if rec, ok := nodeMap[nodeID]; ok {
 			rec.Handles = append(rec.Handles, handle)
+			if desc != "" {
+				if rec.HandleDescriptions == nil {
+					rec.HandleDescriptions = make(map[string]string)
+				}
+				rec.HandleDescriptions[handle] = desc
+			}
 		}
 	}
 

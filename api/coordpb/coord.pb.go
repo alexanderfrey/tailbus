@@ -22,13 +22,14 @@ const (
 )
 
 type RegisterNodeRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	NodeId        string                 `protobuf:"bytes,1,opt,name=node_id,json=nodeId,proto3" json:"node_id,omitempty"`
-	PublicKey     []byte                 `protobuf:"bytes,2,opt,name=public_key,json=publicKey,proto3" json:"public_key,omitempty"`
-	AdvertiseAddr string                 `protobuf:"bytes,3,opt,name=advertise_addr,json=advertiseAddr,proto3" json:"advertise_addr,omitempty"`
-	Handles       []string               `protobuf:"bytes,4,rep,name=handles,proto3" json:"handles,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state              protoimpl.MessageState `protogen:"open.v1"`
+	NodeId             string                 `protobuf:"bytes,1,opt,name=node_id,json=nodeId,proto3" json:"node_id,omitempty"`
+	PublicKey          []byte                 `protobuf:"bytes,2,opt,name=public_key,json=publicKey,proto3" json:"public_key,omitempty"`
+	AdvertiseAddr      string                 `protobuf:"bytes,3,opt,name=advertise_addr,json=advertiseAddr,proto3" json:"advertise_addr,omitempty"`
+	Handles            []string               `protobuf:"bytes,4,rep,name=handles,proto3" json:"handles,omitempty"`
+	HandleDescriptions map[string]string      `protobuf:"bytes,5,rep,name=handle_descriptions,json=handleDescriptions,proto3" json:"handle_descriptions,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	unknownFields      protoimpl.UnknownFields
+	sizeCache          protoimpl.SizeCache
 }
 
 func (x *RegisterNodeRequest) Reset() {
@@ -85,6 +86,13 @@ func (x *RegisterNodeRequest) GetAdvertiseAddr() string {
 func (x *RegisterNodeRequest) GetHandles() []string {
 	if x != nil {
 		return x.Handles
+	}
+	return nil
+}
+
+func (x *RegisterNodeRequest) GetHandleDescriptions() map[string]string {
+	if x != nil {
+		return x.HandleDescriptions
 	}
 	return nil
 }
@@ -238,14 +246,15 @@ func (x *PeerMapUpdate) GetVersion() int64 {
 }
 
 type PeerInfo struct {
-	state             protoimpl.MessageState `protogen:"open.v1"`
-	NodeId            string                 `protobuf:"bytes,1,opt,name=node_id,json=nodeId,proto3" json:"node_id,omitempty"`
-	PublicKey         []byte                 `protobuf:"bytes,2,opt,name=public_key,json=publicKey,proto3" json:"public_key,omitempty"`
-	AdvertiseAddr     string                 `protobuf:"bytes,3,opt,name=advertise_addr,json=advertiseAddr,proto3" json:"advertise_addr,omitempty"`
-	Handles           []string               `protobuf:"bytes,4,rep,name=handles,proto3" json:"handles,omitempty"`
-	LastHeartbeatUnix int64                  `protobuf:"varint,5,opt,name=last_heartbeat_unix,json=lastHeartbeatUnix,proto3" json:"last_heartbeat_unix,omitempty"`
-	unknownFields     protoimpl.UnknownFields
-	sizeCache         protoimpl.SizeCache
+	state              protoimpl.MessageState `protogen:"open.v1"`
+	NodeId             string                 `protobuf:"bytes,1,opt,name=node_id,json=nodeId,proto3" json:"node_id,omitempty"`
+	PublicKey          []byte                 `protobuf:"bytes,2,opt,name=public_key,json=publicKey,proto3" json:"public_key,omitempty"`
+	AdvertiseAddr      string                 `protobuf:"bytes,3,opt,name=advertise_addr,json=advertiseAddr,proto3" json:"advertise_addr,omitempty"`
+	Handles            []string               `protobuf:"bytes,4,rep,name=handles,proto3" json:"handles,omitempty"`
+	LastHeartbeatUnix  int64                  `protobuf:"varint,5,opt,name=last_heartbeat_unix,json=lastHeartbeatUnix,proto3" json:"last_heartbeat_unix,omitempty"`
+	HandleDescriptions map[string]string      `protobuf:"bytes,6,rep,name=handle_descriptions,json=handleDescriptions,proto3" json:"handle_descriptions,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	unknownFields      protoimpl.UnknownFields
+	sizeCache          protoimpl.SizeCache
 }
 
 func (x *PeerInfo) Reset() {
@@ -311,6 +320,13 @@ func (x *PeerInfo) GetLastHeartbeatUnix() int64 {
 		return x.LastHeartbeatUnix
 	}
 	return 0
+}
+
+func (x *PeerInfo) GetHandleDescriptions() map[string]string {
+	if x != nil {
+		return x.HandleDescriptions
+	}
+	return nil
 }
 
 type LookupHandleRequest struct {
@@ -410,11 +426,12 @@ func (x *LookupHandleResponse) GetFound() bool {
 }
 
 type HeartbeatRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	NodeId        string                 `protobuf:"bytes,1,opt,name=node_id,json=nodeId,proto3" json:"node_id,omitempty"`
-	Handles       []string               `protobuf:"bytes,2,rep,name=handles,proto3" json:"handles,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state              protoimpl.MessageState `protogen:"open.v1"`
+	NodeId             string                 `protobuf:"bytes,1,opt,name=node_id,json=nodeId,proto3" json:"node_id,omitempty"`
+	Handles            []string               `protobuf:"bytes,2,rep,name=handles,proto3" json:"handles,omitempty"`
+	HandleDescriptions map[string]string      `protobuf:"bytes,3,rep,name=handle_descriptions,json=handleDescriptions,proto3" json:"handle_descriptions,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	unknownFields      protoimpl.UnknownFields
+	sizeCache          protoimpl.SizeCache
 }
 
 func (x *HeartbeatRequest) Reset() {
@@ -457,6 +474,13 @@ func (x *HeartbeatRequest) GetNodeId() string {
 func (x *HeartbeatRequest) GetHandles() []string {
 	if x != nil {
 		return x.Handles
+	}
+	return nil
+}
+
+func (x *HeartbeatRequest) GetHandleDescriptions() map[string]string {
+	if x != nil {
+		return x.HandleDescriptions
 	}
 	return nil
 }
@@ -510,13 +534,17 @@ var File_tailbus_v1_coord_proto protoreflect.FileDescriptor
 const file_tailbus_v1_coord_proto_rawDesc = "" +
 	"\n" +
 	"\x16tailbus/v1/coord.proto\x12\n" +
-	"tailbus.v1\"\x8e\x01\n" +
+	"tailbus.v1\"\xbf\x02\n" +
 	"\x13RegisterNodeRequest\x12\x17\n" +
 	"\anode_id\x18\x01 \x01(\tR\x06nodeId\x12\x1d\n" +
 	"\n" +
 	"public_key\x18\x02 \x01(\fR\tpublicKey\x12%\n" +
 	"\x0eadvertise_addr\x18\x03 \x01(\tR\radvertiseAddr\x12\x18\n" +
-	"\ahandles\x18\x04 \x03(\tR\ahandles\"<\n" +
+	"\ahandles\x18\x04 \x03(\tR\ahandles\x12h\n" +
+	"\x13handle_descriptions\x18\x05 \x03(\v27.tailbus.v1.RegisterNodeRequest.HandleDescriptionsEntryR\x12handleDescriptions\x1aE\n" +
+	"\x17HandleDescriptionsEntry\x12\x10\n" +
+	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"<\n" +
 	"\x14RegisterNodeResponse\x12\x0e\n" +
 	"\x02ok\x18\x01 \x01(\bR\x02ok\x12\x14\n" +
 	"\x05error\x18\x02 \x01(\tR\x05error\".\n" +
@@ -524,22 +552,30 @@ const file_tailbus_v1_coord_proto_rawDesc = "" +
 	"\anode_id\x18\x01 \x01(\tR\x06nodeId\"U\n" +
 	"\rPeerMapUpdate\x12*\n" +
 	"\x05peers\x18\x01 \x03(\v2\x14.tailbus.v1.PeerInfoR\x05peers\x12\x18\n" +
-	"\aversion\x18\x02 \x01(\x03R\aversion\"\xb3\x01\n" +
+	"\aversion\x18\x02 \x01(\x03R\aversion\"\xd9\x02\n" +
 	"\bPeerInfo\x12\x17\n" +
 	"\anode_id\x18\x01 \x01(\tR\x06nodeId\x12\x1d\n" +
 	"\n" +
 	"public_key\x18\x02 \x01(\fR\tpublicKey\x12%\n" +
 	"\x0eadvertise_addr\x18\x03 \x01(\tR\radvertiseAddr\x12\x18\n" +
 	"\ahandles\x18\x04 \x03(\tR\ahandles\x12.\n" +
-	"\x13last_heartbeat_unix\x18\x05 \x01(\x03R\x11lastHeartbeatUnix\"-\n" +
+	"\x13last_heartbeat_unix\x18\x05 \x01(\x03R\x11lastHeartbeatUnix\x12]\n" +
+	"\x13handle_descriptions\x18\x06 \x03(\v2,.tailbus.v1.PeerInfo.HandleDescriptionsEntryR\x12handleDescriptions\x1aE\n" +
+	"\x17HandleDescriptionsEntry\x12\x10\n" +
+	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"-\n" +
 	"\x13LookupHandleRequest\x12\x16\n" +
 	"\x06handle\x18\x01 \x01(\tR\x06handle\"V\n" +
 	"\x14LookupHandleResponse\x12(\n" +
 	"\x04peer\x18\x01 \x01(\v2\x14.tailbus.v1.PeerInfoR\x04peer\x12\x14\n" +
-	"\x05found\x18\x02 \x01(\bR\x05found\"E\n" +
+	"\x05found\x18\x02 \x01(\bR\x05found\"\xf3\x01\n" +
 	"\x10HeartbeatRequest\x12\x17\n" +
 	"\anode_id\x18\x01 \x01(\tR\x06nodeId\x12\x18\n" +
-	"\ahandles\x18\x02 \x03(\tR\ahandles\"#\n" +
+	"\ahandles\x18\x02 \x03(\tR\ahandles\x12e\n" +
+	"\x13handle_descriptions\x18\x03 \x03(\v24.tailbus.v1.HeartbeatRequest.HandleDescriptionsEntryR\x12handleDescriptions\x1aE\n" +
+	"\x17HandleDescriptionsEntry\x12\x10\n" +
+	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"#\n" +
 	"\x11HeartbeatResponse\x12\x0e\n" +
 	"\x02ok\x18\x01 \x01(\bR\x02ok2\xcf\x02\n" +
 	"\x0fCoordinationAPI\x12Q\n" +
@@ -560,7 +596,7 @@ func file_tailbus_v1_coord_proto_rawDescGZIP() []byte {
 	return file_tailbus_v1_coord_proto_rawDescData
 }
 
-var file_tailbus_v1_coord_proto_msgTypes = make([]protoimpl.MessageInfo, 9)
+var file_tailbus_v1_coord_proto_msgTypes = make([]protoimpl.MessageInfo, 12)
 var file_tailbus_v1_coord_proto_goTypes = []any{
 	(*RegisterNodeRequest)(nil),  // 0: tailbus.v1.RegisterNodeRequest
 	(*RegisterNodeResponse)(nil), // 1: tailbus.v1.RegisterNodeResponse
@@ -571,23 +607,29 @@ var file_tailbus_v1_coord_proto_goTypes = []any{
 	(*LookupHandleResponse)(nil), // 6: tailbus.v1.LookupHandleResponse
 	(*HeartbeatRequest)(nil),     // 7: tailbus.v1.HeartbeatRequest
 	(*HeartbeatResponse)(nil),    // 8: tailbus.v1.HeartbeatResponse
+	nil,                          // 9: tailbus.v1.RegisterNodeRequest.HandleDescriptionsEntry
+	nil,                          // 10: tailbus.v1.PeerInfo.HandleDescriptionsEntry
+	nil,                          // 11: tailbus.v1.HeartbeatRequest.HandleDescriptionsEntry
 }
 var file_tailbus_v1_coord_proto_depIdxs = []int32{
-	4, // 0: tailbus.v1.PeerMapUpdate.peers:type_name -> tailbus.v1.PeerInfo
-	4, // 1: tailbus.v1.LookupHandleResponse.peer:type_name -> tailbus.v1.PeerInfo
-	0, // 2: tailbus.v1.CoordinationAPI.RegisterNode:input_type -> tailbus.v1.RegisterNodeRequest
-	2, // 3: tailbus.v1.CoordinationAPI.WatchPeerMap:input_type -> tailbus.v1.WatchPeerMapRequest
-	5, // 4: tailbus.v1.CoordinationAPI.LookupHandle:input_type -> tailbus.v1.LookupHandleRequest
-	7, // 5: tailbus.v1.CoordinationAPI.Heartbeat:input_type -> tailbus.v1.HeartbeatRequest
-	1, // 6: tailbus.v1.CoordinationAPI.RegisterNode:output_type -> tailbus.v1.RegisterNodeResponse
-	3, // 7: tailbus.v1.CoordinationAPI.WatchPeerMap:output_type -> tailbus.v1.PeerMapUpdate
-	6, // 8: tailbus.v1.CoordinationAPI.LookupHandle:output_type -> tailbus.v1.LookupHandleResponse
-	8, // 9: tailbus.v1.CoordinationAPI.Heartbeat:output_type -> tailbus.v1.HeartbeatResponse
-	6, // [6:10] is the sub-list for method output_type
-	2, // [2:6] is the sub-list for method input_type
-	2, // [2:2] is the sub-list for extension type_name
-	2, // [2:2] is the sub-list for extension extendee
-	0, // [0:2] is the sub-list for field type_name
+	9,  // 0: tailbus.v1.RegisterNodeRequest.handle_descriptions:type_name -> tailbus.v1.RegisterNodeRequest.HandleDescriptionsEntry
+	4,  // 1: tailbus.v1.PeerMapUpdate.peers:type_name -> tailbus.v1.PeerInfo
+	10, // 2: tailbus.v1.PeerInfo.handle_descriptions:type_name -> tailbus.v1.PeerInfo.HandleDescriptionsEntry
+	4,  // 3: tailbus.v1.LookupHandleResponse.peer:type_name -> tailbus.v1.PeerInfo
+	11, // 4: tailbus.v1.HeartbeatRequest.handle_descriptions:type_name -> tailbus.v1.HeartbeatRequest.HandleDescriptionsEntry
+	0,  // 5: tailbus.v1.CoordinationAPI.RegisterNode:input_type -> tailbus.v1.RegisterNodeRequest
+	2,  // 6: tailbus.v1.CoordinationAPI.WatchPeerMap:input_type -> tailbus.v1.WatchPeerMapRequest
+	5,  // 7: tailbus.v1.CoordinationAPI.LookupHandle:input_type -> tailbus.v1.LookupHandleRequest
+	7,  // 8: tailbus.v1.CoordinationAPI.Heartbeat:input_type -> tailbus.v1.HeartbeatRequest
+	1,  // 9: tailbus.v1.CoordinationAPI.RegisterNode:output_type -> tailbus.v1.RegisterNodeResponse
+	3,  // 10: tailbus.v1.CoordinationAPI.WatchPeerMap:output_type -> tailbus.v1.PeerMapUpdate
+	6,  // 11: tailbus.v1.CoordinationAPI.LookupHandle:output_type -> tailbus.v1.LookupHandleResponse
+	8,  // 12: tailbus.v1.CoordinationAPI.Heartbeat:output_type -> tailbus.v1.HeartbeatResponse
+	9,  // [9:13] is the sub-list for method output_type
+	5,  // [5:9] is the sub-list for method input_type
+	5,  // [5:5] is the sub-list for extension type_name
+	5,  // [5:5] is the sub-list for extension extendee
+	0,  // [0:5] is the sub-list for field type_name
 }
 
 func init() { file_tailbus_v1_coord_proto_init() }
@@ -601,7 +643,7 @@ func file_tailbus_v1_coord_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_tailbus_v1_coord_proto_rawDesc), len(file_tailbus_v1_coord_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   9,
+			NumMessages:   12,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

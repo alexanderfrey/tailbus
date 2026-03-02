@@ -50,7 +50,7 @@ func (s *Server) GracefulStop() {
 
 // RegisterNode handles node registration.
 func (s *Server) RegisterNode(_ context.Context, req *pb.RegisterNodeRequest) (*pb.RegisterNodeResponse, error) {
-	if err := s.registry.RegisterNode(req.NodeId, req.PublicKey, req.AdvertiseAddr, req.Handles); err != nil {
+	if err := s.registry.RegisterNode(req.NodeId, req.PublicKey, req.AdvertiseAddr, req.Handles, req.HandleDescriptions); err != nil {
 		return &pb.RegisterNodeResponse{Ok: false, Error: err.Error()}, nil
 	}
 
@@ -115,7 +115,7 @@ func (s *Server) LookupHandle(_ context.Context, req *pb.LookupHandleRequest) (*
 
 // Heartbeat handles node heartbeats.
 func (s *Server) Heartbeat(_ context.Context, req *pb.HeartbeatRequest) (*pb.HeartbeatResponse, error) {
-	if err := s.registry.Heartbeat(req.NodeId, req.Handles); err != nil {
+	if err := s.registry.Heartbeat(req.NodeId, req.Handles, req.HandleDescriptions); err != nil {
 		return &pb.HeartbeatResponse{Ok: false}, nil
 	}
 

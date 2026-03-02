@@ -18,6 +18,7 @@ import (
 type inboundCmd struct {
 	Type        string `json:"type"`
 	Handle      string `json:"handle,omitempty"`
+	Description string `json:"description,omitempty"`
 	To          string `json:"to,omitempty"`
 	Session     string `json:"session,omitempty"`
 	Payload     string `json:"payload,omitempty"`
@@ -47,6 +48,13 @@ type sentResp struct {
 type resolvedResp struct {
 	Type      string `json:"type"`
 	MessageID string `json:"message_id"`
+}
+
+type describedResp struct {
+	Type        string `json:"type"`
+	Handle      string `json:"handle"`
+	Description string `json:"description"`
+	Found       bool   `json:"found"`
 }
 
 type messageResp struct {
@@ -161,7 +169,7 @@ func runAgent(client agentpb.AgentAPIClient, logger *slog.Logger) error {
 					w.Write(errorResp{Type: "error", Error: "handle is required", RequestType: "register"})
 					continue
 				}
-				resp, err := client.Register(ctx, &agentpb.RegisterRequest{Handle: cmd.Handle})
+				resp, err := client.Register(ctx, &agentpb.RegisterRequest{Handle: cmd.Handle, Description: cmd.Description})
 				if err != nil {
 					w.Write(errorResp{Type: "error", Error: err.Error(), RequestType: "register"})
 					continue
@@ -302,6 +310,18 @@ func runAgent(client agentpb.AgentAPIClient, logger *slog.Logger) error {
 					})
 				}
 				w.Write(sessionsResp{Type: "sessions", Sessions: items})
+
+			case "describe":
+				if cmd.Handle == "" {
+					w.Write(errorResp{Type: "error", Error: "handle is required", RequestType: "describe"})
+					continue
+				}
+				resp, err := client.DescribeHandle(ctx, &agentpb.DescribeHandleRequest{Handle: cmd.Handle})
+				if err != nil {
+					w.Write(errorResp{Type: "error", Error: err.Error(), RequestType: "describe"})
+					continue
+				}
+				w.Write(describedResp{Type: "described", Handle: resp.Handle, Description: resp.Description, Found: resp.Found})
 
 			default:
 				w.Write(errorResp{Type: "error", Error: "unknown command type: " + cmd.Type, RequestType: cmd.Type})
