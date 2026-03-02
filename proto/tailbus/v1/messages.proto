@@ -1,0 +1,24 @@
+syntax = "proto3";
+
+package tailbus.v1;
+
+option go_package = "github.com/alexanderfrey/tailbus/api/messagepb";
+
+enum EnvelopeType {
+  ENVELOPE_TYPE_UNSPECIFIED = 0;
+  ENVELOPE_TYPE_MESSAGE = 1;
+  ENVELOPE_TYPE_SESSION_OPEN = 2;
+  ENVELOPE_TYPE_SESSION_RESOLVE = 3;
+  ENVELOPE_TYPE_ACK = 4;
+}
+
+message Envelope {
+  string message_id = 1;
+  string session_id = 2;
+  string from_handle = 3;
+  string to_handle = 4;
+  bytes payload = 5;
+  string content_type = 6;
+  int64 sent_at_unix = 7;
+  EnvelopeType type = 8;
+}

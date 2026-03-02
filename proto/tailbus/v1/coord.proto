@@ -1,0 +1,59 @@
+syntax = "proto3";
+
+package tailbus.v1;
+
+option go_package = "github.com/alexanderfrey/tailbus/api/coordpb";
+
+service CoordinationAPI {
+  rpc RegisterNode(RegisterNodeRequest) returns (RegisterNodeResponse);
+  rpc WatchPeerMap(WatchPeerMapRequest) returns (stream PeerMapUpdate);
+  rpc LookupHandle(LookupHandleRequest) returns (LookupHandleResponse);
+  rpc Heartbeat(HeartbeatRequest) returns (HeartbeatResponse);
+}
+
+message RegisterNodeRequest {
+  string node_id = 1;
+  bytes public_key = 2;
+  string advertise_addr = 3;
+  repeated string handles = 4;
+}
+
+message RegisterNodeResponse {
+  bool ok = 1;
+  string error = 2;
+}
+
+message WatchPeerMapRequest {
+  string node_id = 1;
+}
+
+message PeerMapUpdate {
+  repeated PeerInfo peers = 1;
+  int64 version = 2;
+}
+
+message PeerInfo {
+  string node_id = 1;
+  bytes public_key = 2;
+  string advertise_addr = 3;
+  repeated string handles = 4;
+  int64 last_heartbeat_unix = 5;
+}
+
+message LookupHandleRequest {
+  string handle = 1;
+}
+
+message LookupHandleResponse {
+  PeerInfo peer = 1;
+  bool found = 2;
+}
+
+message HeartbeatRequest {
+  string node_id = 1;
+  repeated string handles = 2;
+}
+
+message HeartbeatResponse {
+  bool ok = 1;
+}

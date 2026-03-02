@@ -1,0 +1,209 @@
+package coord
+
+import (
+	"database/sql"
+	"fmt"
+	"time"
+
+	_ "github.com/mattn/go-sqlite3"
+)
+
+// NodeRecord represents a registered node in the database.
+type NodeRecord struct {
+	NodeID        string
+	PublicKey     []byte
+	AdvertiseAddr string
+	Handles       []string
+	LastHeartbeat time.Time
+}
+
+// Store provides SQLite persistence for the coordination server.
+type Store struct {
+	db *sql.DB
+}
+
+// NewStore opens or creates a SQLite database at the given path.
+func NewStore(dbPath string) (*Store, error) {
+	db, err := sql.Open("sqlite3", dbPath+"?_journal_mode=WAL")
+	if err != nil {
+		return nil, fmt.Errorf("open database: %w", err)
+	}
+	s := &Store{db: db}
+	if err := s.migrate(); err != nil {
+		db.Close()
+		return nil, err
+	}
+	return s, nil
+}
+
+func (s *Store) migrate() error {
+	_, err := s.db.Exec(`
+		CREATE TABLE IF NOT EXISTS nodes (
+			node_id TEXT PRIMARY KEY,
+			public_key BLOB NOT NULL,
+			advertise_addr TEXT NOT NULL,
+			last_heartbeat INTEGER NOT NULL
+		);
+		CREATE TABLE IF NOT EXISTS handles (
+			handle TEXT PRIMARY KEY,
+			node_id TEXT NOT NULL REFERENCES nodes(node_id) ON DELETE CASCADE
+		);
+	`)
+	return err
+}
+
+// UpsertNode inserts or updates a node record and its handles.
+func (s *Store) UpsertNode(rec *NodeRecord) error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	_, err = tx.Exec(`
+		INSERT INTO nodes (node_id, public_key, advertise_addr, last_heartbeat)
+		VALUES (?, ?, ?, ?)
+		ON CONFLICT(node_id) DO UPDATE SET
+			public_key = excluded.public_key,
+			advertise_addr = excluded.advertise_addr,
+			last_heartbeat = excluded.last_heartbeat
+	`, rec.NodeID, rec.PublicKey, rec.AdvertiseAddr, rec.LastHeartbeat.Unix())
+	if err != nil {
+		return err
+	}
+
+	// Remove old handles for this node
+	_, err = tx.Exec("DELETE FROM handles WHERE node_id = ?", rec.NodeID)
+	if err != nil {
+		return err
+	}
+
+	// Insert new handles
+	for _, h := range rec.Handles {
+		_, err = tx.Exec("INSERT INTO handles (handle, node_id) VALUES (?, ?)", h, rec.NodeID)
+		if err != nil {
+			return fmt.Errorf("register handle %q: %w", h, err)
+		}
+	}
+
+	return tx.Commit()
+}
+
+// UpdateHeartbeat updates the heartbeat timestamp and handles for a node.
+func (s *Store) UpdateHeartbeat(nodeID string, handles []string) error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	res, err := tx.Exec("UPDATE nodes SET last_heartbeat = ? WHERE node_id = ?", time.Now().Unix(), nodeID)
+	if err != nil {
+		return err
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return fmt.Errorf("node %q not found", nodeID)
+	}
+
+	// Update handles
+	_, err = tx.Exec("DELETE FROM handles WHERE node_id = ?", nodeID)
+	if err != nil {
+		return err
+	}
+	for _, h := range handles {
+		_, err = tx.Exec("INSERT OR REPLACE INTO handles (handle, node_id) VALUES (?, ?)", h, nodeID)
+		if err != nil {
+			return err
+		}
+	}
+
+	return tx.Commit()
+}
+
+// GetAllNodes returns all registered nodes with their handles.
+func (s *Store) GetAllNodes() ([]*NodeRecord, error) {
+	rows, err := s.db.Query("SELECT node_id, public_key, advertise_addr, last_heartbeat FROM nodes")
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	nodeMap := make(map[string]*NodeRecord)
+	var nodes []*NodeRecord
+	for rows.Next() {
+		var rec NodeRecord
+		var ts int64
+		if err := rows.Scan(&rec.NodeID, &rec.PublicKey, &rec.AdvertiseAddr, &ts); err != nil {
+			return nil, err
+		}
+		rec.LastHeartbeat = time.Unix(ts, 0)
+		nodeMap[rec.NodeID] = &rec
+		nodes = append(nodes, &rec)
+	}
+
+	// Load handles
+	hrows, err := s.db.Query("SELECT handle, node_id FROM handles")
+	if err != nil {
+		return nil, err
+	}
+	defer hrows.Close()
+	for hrows.Next() {
+		var handle, nodeID string
+		if err := hrows.Scan(&handle, &nodeID); err != nil {
+			return nil, err
+		}
+		if rec, ok := nodeMap[nodeID]; ok {
+			rec.Handles = append(rec.Handles, handle)
+		}
+	}
+
+	return nodes, nil
+}
+
+// LookupHandle finds which node serves a given handle.
+func (s *Store) LookupHandle(handle string) (*NodeRecord, error) {
+	var nodeID string
+	err := s.db.QueryRow("SELECT node_id FROM handles WHERE handle = ?", handle).Scan(&nodeID)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+
+	var rec NodeRecord
+	var ts int64
+	err = s.db.QueryRow("SELECT node_id, public_key, advertise_addr, last_heartbeat FROM nodes WHERE node_id = ?", nodeID).
+		Scan(&rec.NodeID, &rec.PublicKey, &rec.AdvertiseAddr, &ts)
+	if err != nil {
+		return nil, err
+	}
+	rec.LastHeartbeat = time.Unix(ts, 0)
+
+	hrows, err := s.db.Query("SELECT handle FROM handles WHERE node_id = ?", nodeID)
+	if err != nil {
+		return nil, err
+	}
+	defer hrows.Close()
+	for hrows.Next() {
+		var h string
+		if err := hrows.Scan(&h); err != nil {
+			return nil, err
+		}
+		rec.Handles = append(rec.Handles, h)
+	}
+
+	return &rec, nil
+}
+
+// RemoveNode removes a node and its handles.
+func (s *Store) RemoveNode(nodeID string) error {
+	_, err := s.db.Exec("DELETE FROM nodes WHERE node_id = ?", nodeID)
+	return err
+}
+
+// Close closes the database.
+func (s *Store) Close() error {
+	return s.db.Close()
+}

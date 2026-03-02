@@ -1,0 +1,84 @@
+syntax = "proto3";
+
+package tailbus.v1;
+
+option go_package = "github.com/alexanderfrey/tailbus/api/agentpb";
+
+import "tailbus/v1/messages.proto";
+
+service AgentAPI {
+  rpc Register(RegisterRequest) returns (RegisterResponse);
+  rpc OpenSession(OpenSessionRequest) returns (OpenSessionResponse);
+  rpc SendMessage(SendMessageRequest) returns (SendMessageResponse);
+  rpc Subscribe(SubscribeRequest) returns (stream IncomingMessage);
+  rpc ResolveSession(ResolveSessionRequest) returns (ResolveSessionResponse);
+  rpc ListSessions(ListSessionsRequest) returns (ListSessionsResponse);
+}
+
+message RegisterRequest {
+  string handle = 1;
+}
+
+message RegisterResponse {
+  bool ok = 1;
+  string error = 2;
+}
+
+message OpenSessionRequest {
+  string from_handle = 1;
+  string to_handle = 2;
+  bytes payload = 3;
+  string content_type = 4;
+}
+
+message OpenSessionResponse {
+  string session_id = 1;
+  string message_id = 2;
+}
+
+message SendMessageRequest {
+  string session_id = 1;
+  string from_handle = 2;
+  bytes payload = 3;
+  string content_type = 4;
+}
+
+message SendMessageResponse {
+  string message_id = 1;
+}
+
+message SubscribeRequest {
+  string handle = 1;
+}
+
+message IncomingMessage {
+  Envelope envelope = 1;
+}
+
+message ResolveSessionRequest {
+  string session_id = 1;
+  string from_handle = 2;
+  bytes payload = 3;
+  string content_type = 4;
+}
+
+message ResolveSessionResponse {
+  string message_id = 1;
+}
+
+message ListSessionsRequest {
+  string handle = 1;
+}
+
+message ListSessionsResponse {
+  repeated SessionInfo sessions = 1;
+}
+
+message SessionInfo {
+  string session_id = 1;
+  string from_handle = 2;
+  string to_handle = 3;
+  string state = 4;
+  int64 created_at_unix = 5;
+  int64 updated_at_unix = 6;
+}

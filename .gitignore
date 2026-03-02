@@ -1,0 +1,12 @@
+# Binaries
+bin/
+*.exe
+
+# Data
+*.db
+*.db-wal
+*.db-shm
+*.key
+
+# OS
+.DS_Store

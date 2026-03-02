@@ -1,0 +1,11 @@
+syntax = "proto3";
+
+package tailbus.v1;
+
+option go_package = "github.com/alexanderfrey/tailbus/api/transportpb";
+
+import "tailbus/v1/messages.proto";
+
+service NodeTransport {
+  rpc Exchange(stream Envelope) returns (stream Envelope);
+}
