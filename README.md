@@ -24,7 +24,7 @@ Think of it as **Slack for autonomous agents** — agents register handles, open
 ## Features
 
 - **Handle-based addressing** — agents register names like `marketing`, `sales`, `planner` and message each other without knowing which node they're on
-- **Handle descriptions** — agents register with a description string; any agent can query it via `DescribeHandle` RPC or `tailbus describe <handle>`
+- **Service manifests** — agents register with a structured `ServiceManifest` (description, commands, tags, version); query via `IntrospectHandle` or discover handles via `ListHandles` with tag filtering
 - **@-mention auto-routing** — when a `text/*` message contains `@handle`, the daemon automatically opens a new session to each mentioned handle
 - **Session lifecycle** — structured conversations with open / message / resolve states
 - **P2P data plane** — messages flow directly between daemons via bidirectional gRPC streams, not through the coord server
@@ -191,7 +191,8 @@ tailbus [flags] <command> [args]
 | Command | Usage | Description |
 |---------|-------|-------------|
 | `register` | `register <handle>` | Register an agent handle on the local node |
-| `describe` | `describe <handle>` | Show the description for a handle |
+| `introspect` | `introspect <handle>` | Show the full service manifest for a handle |
+| `list` | `list [tags]` | List all handles, optionally filtered by comma-separated tags |
 | `open` | `open <from> <to> <message>` | Open a new session with an initial message |
 | `send` | `send <session-id> <from> <message>` | Send a message within an existing session |
 | `subscribe` | `subscribe <handle>` | Stream incoming messages (blocks until Ctrl-C) |
@@ -284,7 +285,7 @@ The interactive dashboard provides a real-time view of the local daemon:
 
 ```
 proto/tailbus/v1/           Protocol buffer definitions
-  messages.proto              Envelope, EnvelopeType
+  messages.proto              Envelope, EnvelopeType, ServiceManifest, CommandSpec
   agent.proto                 AgentAPI service (local daemon <-> agents)
   coord.proto                 CoordinationAPI service (daemon <-> coord)
   transport.proto             NodeTransport service (daemon <-> daemon P2P)
@@ -347,8 +348,11 @@ The `tailbus agent` subcommand provides a **JSON-lines stdio bridge** so any pro
 **Inbound (stdin)** — one JSON object per line:
 
 ```jsonl
-{"type":"register","handle":"marketing","description":"Marketing team agent"}
-{"type":"describe","handle":"sales"}
+{"type":"register","handle":"marketing","manifest":{"description":"Marketing team agent","tags":["marketing","comms"],"version":"1.0","commands":[{"name":"campaign","description":"Run a campaign"}]}}
+{"type":"register","handle":"simple-agent","description":"Legacy plain description"}
+{"type":"introspect","handle":"sales"}
+{"type":"list"}
+{"type":"list","tags":["marketing"]}
 {"type":"open","to":"sales","payload":"Need Q4 numbers"}
 {"type":"open","to":"sales","payload":"{}","content_type":"application/json","trace_id":"my-id"}
 {"type":"send","session":"<id>","payload":"Q4 revenue: $1.2M"}
@@ -358,8 +362,11 @@ The `tailbus agent` subcommand provides a **JSON-lines stdio bridge** so any pro
 ```
 
 - `register` must be the first command (one registration per process)
-- `description` on `register` is optional — describes what the handle offers
-- `describe` can be sent at any time (no registration required)
+- `manifest` on `register` is optional — structured description of capabilities (description, commands, tags, version)
+- `description` on `register` is deprecated but still supported for backward compatibility
+- `introspect` returns the full manifest for a handle (no registration required)
+- `list` returns all known handles; optionally filter by `tags` array
+- `describe` is still accepted as an alias for `introspect`
 - `content_type` defaults to `text/plain` if omitted
 - `trace_id` on `open` is optional (auto-generated if omitted)
 - `payload` on `resolve` is optional
@@ -368,7 +375,8 @@ The `tailbus agent` subcommand provides a **JSON-lines stdio bridge** so any pro
 
 ```jsonl
 {"type":"registered","handle":"marketing"}
-{"type":"described","handle":"sales","description":"Sales team agent","found":true}
+{"type":"introspected","handle":"sales","found":true,"manifest":{"description":"Sales team agent","tags":["sales"],"version":"1.0","commands":[{"name":"quote","description":"Get a quote"}]}}
+{"type":"handles","entries":[{"handle":"marketing","manifest":{"description":"Marketing team agent","tags":["marketing"]}},{"handle":"sales","manifest":{"description":"Sales team agent","tags":["sales"]}}]}
 {"type":"opened","session":"<id>","message_id":"<id>","trace_id":"<id>"}
 {"type":"sent","message_id":"<id>"}
 {"type":"resolved","message_id":"<id>"}
@@ -431,6 +439,8 @@ External agents connect to the local daemon's Unix socket using any gRPC client.
 ```protobuf
 service AgentAPI {
   rpc Register(RegisterRequest) returns (RegisterResponse);
+  rpc IntrospectHandle(IntrospectHandleRequest) returns (IntrospectHandleResponse);
+  rpc ListHandles(ListHandlesRequest) returns (ListHandlesResponse);
   rpc OpenSession(OpenSessionRequest) returns (OpenSessionResponse);
   rpc SendMessage(SendMessageRequest) returns (SendMessageResponse);
   rpc Subscribe(SubscribeRequest) returns (stream IncomingMessage);
@@ -449,8 +459,14 @@ conn, _ := grpc.NewClient("unix:///tmp/tailbusd.sock",
     grpc.WithTransportCredentials(insecure.NewCredentials()))
 client := agentpb.NewAgentAPIClient(conn)
 
-// Register
-client.Register(ctx, &agentpb.RegisterRequest{Handle: "my-agent"})
+// Register with a service manifest
+client.Register(ctx, &agentpb.RegisterRequest{
+    Handle: "my-agent",
+    Manifest: &messagepb.ServiceManifest{
+        Description: "My agent",
+        Tags:        []string{"demo"},
+    },
+})
 
 // Subscribe to messages
 stream, _ := client.Subscribe(ctx, &agentpb.SubscribeRequest{Handle: "my-agent"})
