@@ -15,15 +15,30 @@ import (
 
 // Inbound command types (stdin)
 
+type commandCmd struct {
+	Name             string `json:"name"`
+	Description      string `json:"description,omitempty"`
+	ParametersSchema string `json:"parameters_schema,omitempty"`
+}
+
+type manifestCmd struct {
+	Description string       `json:"description,omitempty"`
+	Commands    []commandCmd `json:"commands,omitempty"`
+	Tags        []string     `json:"tags,omitempty"`
+	Version     string       `json:"version,omitempty"`
+}
+
 type inboundCmd struct {
-	Type        string `json:"type"`
-	Handle      string `json:"handle,omitempty"`
-	Description string `json:"description,omitempty"`
-	To          string `json:"to,omitempty"`
-	Session     string `json:"session,omitempty"`
-	Payload     string `json:"payload,omitempty"`
-	ContentType string `json:"content_type,omitempty"`
-	TraceID     string `json:"trace_id,omitempty"`
+	Type        string       `json:"type"`
+	Handle      string       `json:"handle,omitempty"`
+	Description string       `json:"description,omitempty"` // deprecated, use manifest
+	Manifest    *manifestCmd `json:"manifest,omitempty"`
+	Tags        []string     `json:"tags,omitempty"` // for list command
+	To          string       `json:"to,omitempty"`
+	Session     string       `json:"session,omitempty"`
+	Payload     string       `json:"payload,omitempty"`
+	ContentType string       `json:"content_type,omitempty"`
+	TraceID     string       `json:"trace_id,omitempty"`
 }
 
 // Outbound response types (stdout)
@@ -50,11 +65,28 @@ type resolvedResp struct {
 	MessageID string `json:"message_id"`
 }
 
-type describedResp struct {
-	Type        string `json:"type"`
-	Handle      string `json:"handle"`
-	Description string `json:"description"`
-	Found       bool   `json:"found"`
+type introspectManifestResp struct {
+	Description string       `json:"description,omitempty"`
+	Commands    []commandCmd `json:"commands,omitempty"`
+	Tags        []string     `json:"tags,omitempty"`
+	Version     string       `json:"version,omitempty"`
+}
+
+type introspectedResp struct {
+	Type     string                  `json:"type"`
+	Handle   string                  `json:"handle"`
+	Found    bool                    `json:"found"`
+	Manifest *introspectManifestResp `json:"manifest,omitempty"`
+}
+
+type listEntry struct {
+	Handle   string                  `json:"handle"`
+	Manifest *introspectManifestResp `json:"manifest,omitempty"`
+}
+
+type listResp struct {
+	Type    string      `json:"type"`
+	Entries []listEntry `json:"entries"`
 }
 
 type messageResp struct {
@@ -119,6 +151,25 @@ func envelopeTypeString(t messagepb.EnvelopeType) string {
 	}
 }
 
+func protoManifestToResp(m *messagepb.ServiceManifest) *introspectManifestResp {
+	if m == nil {
+		return nil
+	}
+	resp := &introspectManifestResp{
+		Description: m.Description,
+		Tags:        m.Tags,
+		Version:     m.Version,
+	}
+	for _, c := range m.Commands {
+		resp.Commands = append(resp.Commands, commandCmd{
+			Name:             c.Name,
+			Description:      c.Description,
+			ParametersSchema: c.ParametersSchema,
+		})
+	}
+	return resp
+}
+
 func runAgent(client agentpb.AgentAPIClient, logger *slog.Logger) error {
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer cancel()
@@ -169,7 +220,26 @@ func runAgent(client agentpb.AgentAPIClient, logger *slog.Logger) error {
 					w.Write(errorResp{Type: "error", Error: "handle is required", RequestType: "register"})
 					continue
 				}
-				resp, err := client.Register(ctx, &agentpb.RegisterRequest{Handle: cmd.Handle, Description: cmd.Description})
+				// Build register request: prefer manifest, fall back to description
+				req := &agentpb.RegisterRequest{Handle: cmd.Handle}
+				if cmd.Manifest != nil {
+					m := &messagepb.ServiceManifest{
+						Description: cmd.Manifest.Description,
+						Tags:        cmd.Manifest.Tags,
+						Version:     cmd.Manifest.Version,
+					}
+					for _, c := range cmd.Manifest.Commands {
+						m.Commands = append(m.Commands, &messagepb.CommandSpec{
+							Name:             c.Name,
+							Description:      c.Description,
+							ParametersSchema: c.ParametersSchema,
+						})
+					}
+					req.Manifest = m
+				} else if cmd.Description != "" {
+					req.Description = cmd.Description
+				}
+				resp, err := client.Register(ctx, req)
 				if err != nil {
 					w.Write(errorResp{Type: "error", Error: err.Error(), RequestType: "register"})
 					continue
@@ -311,17 +381,55 @@ func runAgent(client agentpb.AgentAPIClient, logger *slog.Logger) error {
 				}
 				w.Write(sessionsResp{Type: "sessions", Sessions: items})
 
+			case "introspect":
+				if cmd.Handle == "" {
+					w.Write(errorResp{Type: "error", Error: "handle is required", RequestType: "introspect"})
+					continue
+				}
+				resp, err := client.IntrospectHandle(ctx, &agentpb.IntrospectHandleRequest{Handle: cmd.Handle})
+				if err != nil {
+					w.Write(errorResp{Type: "error", Error: err.Error(), RequestType: "introspect"})
+					continue
+				}
+				w.Write(introspectedResp{
+					Type:     "introspected",
+					Handle:   resp.Handle,
+					Found:    resp.Found,
+					Manifest: protoManifestToResp(resp.Manifest),
+				})
+
+			case "list":
+				resp, err := client.ListHandles(ctx, &agentpb.ListHandlesRequest{Tags: cmd.Tags})
+				if err != nil {
+					w.Write(errorResp{Type: "error", Error: err.Error(), RequestType: "list"})
+					continue
+				}
+				entries := make([]listEntry, 0, len(resp.Entries))
+				for _, e := range resp.Entries {
+					entries = append(entries, listEntry{
+						Handle:   e.Handle,
+						Manifest: protoManifestToResp(e.Manifest),
+					})
+				}
+				w.Write(listResp{Type: "handles", Entries: entries})
+
+			// Keep backward compat: "describe" maps to "introspect"
 			case "describe":
 				if cmd.Handle == "" {
 					w.Write(errorResp{Type: "error", Error: "handle is required", RequestType: "describe"})
 					continue
 				}
-				resp, err := client.DescribeHandle(ctx, &agentpb.DescribeHandleRequest{Handle: cmd.Handle})
+				resp, err := client.IntrospectHandle(ctx, &agentpb.IntrospectHandleRequest{Handle: cmd.Handle})
 				if err != nil {
 					w.Write(errorResp{Type: "error", Error: err.Error(), RequestType: "describe"})
 					continue
 				}
-				w.Write(describedResp{Type: "described", Handle: resp.Handle, Description: resp.Description, Found: resp.Found})
+				w.Write(introspectedResp{
+					Type:     "introspected",
+					Handle:   resp.Handle,
+					Found:    resp.Found,
+					Manifest: protoManifestToResp(resp.Manifest),
+				})
 
 			default:
 				w.Write(errorResp{Type: "error", Error: "unknown command type: " + cmd.Type, RequestType: cmd.Type})

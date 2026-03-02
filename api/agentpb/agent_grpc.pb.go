@@ -19,16 +19,17 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	AgentAPI_Register_FullMethodName       = "/tailbus.v1.AgentAPI/Register"
-	AgentAPI_DescribeHandle_FullMethodName = "/tailbus.v1.AgentAPI/DescribeHandle"
-	AgentAPI_OpenSession_FullMethodName    = "/tailbus.v1.AgentAPI/OpenSession"
-	AgentAPI_SendMessage_FullMethodName    = "/tailbus.v1.AgentAPI/SendMessage"
-	AgentAPI_Subscribe_FullMethodName      = "/tailbus.v1.AgentAPI/Subscribe"
-	AgentAPI_ResolveSession_FullMethodName = "/tailbus.v1.AgentAPI/ResolveSession"
-	AgentAPI_ListSessions_FullMethodName   = "/tailbus.v1.AgentAPI/ListSessions"
-	AgentAPI_GetNodeStatus_FullMethodName  = "/tailbus.v1.AgentAPI/GetNodeStatus"
-	AgentAPI_WatchActivity_FullMethodName  = "/tailbus.v1.AgentAPI/WatchActivity"
-	AgentAPI_GetTrace_FullMethodName       = "/tailbus.v1.AgentAPI/GetTrace"
+	AgentAPI_Register_FullMethodName         = "/tailbus.v1.AgentAPI/Register"
+	AgentAPI_IntrospectHandle_FullMethodName = "/tailbus.v1.AgentAPI/IntrospectHandle"
+	AgentAPI_ListHandles_FullMethodName      = "/tailbus.v1.AgentAPI/ListHandles"
+	AgentAPI_OpenSession_FullMethodName      = "/tailbus.v1.AgentAPI/OpenSession"
+	AgentAPI_SendMessage_FullMethodName      = "/tailbus.v1.AgentAPI/SendMessage"
+	AgentAPI_Subscribe_FullMethodName        = "/tailbus.v1.AgentAPI/Subscribe"
+	AgentAPI_ResolveSession_FullMethodName   = "/tailbus.v1.AgentAPI/ResolveSession"
+	AgentAPI_ListSessions_FullMethodName     = "/tailbus.v1.AgentAPI/ListSessions"
+	AgentAPI_GetNodeStatus_FullMethodName    = "/tailbus.v1.AgentAPI/GetNodeStatus"
+	AgentAPI_WatchActivity_FullMethodName    = "/tailbus.v1.AgentAPI/WatchActivity"
+	AgentAPI_GetTrace_FullMethodName         = "/tailbus.v1.AgentAPI/GetTrace"
 )
 
 // AgentAPIClient is the client API for AgentAPI service.
@@ -36,7 +37,8 @@ const (
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 type AgentAPIClient interface {
 	Register(ctx context.Context, in *RegisterRequest, opts ...grpc.CallOption) (*RegisterResponse, error)
-	DescribeHandle(ctx context.Context, in *DescribeHandleRequest, opts ...grpc.CallOption) (*DescribeHandleResponse, error)
+	IntrospectHandle(ctx context.Context, in *IntrospectHandleRequest, opts ...grpc.CallOption) (*IntrospectHandleResponse, error)
+	ListHandles(ctx context.Context, in *ListHandlesRequest, opts ...grpc.CallOption) (*ListHandlesResponse, error)
 	OpenSession(ctx context.Context, in *OpenSessionRequest, opts ...grpc.CallOption) (*OpenSessionResponse, error)
 	SendMessage(ctx context.Context, in *SendMessageRequest, opts ...grpc.CallOption) (*SendMessageResponse, error)
 	Subscribe(ctx context.Context, in *SubscribeRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[IncomingMessage], error)
@@ -65,10 +67,20 @@ func (c *agentAPIClient) Register(ctx context.Context, in *RegisterRequest, opts
 	return out, nil
 }
 
-func (c *agentAPIClient) DescribeHandle(ctx context.Context, in *DescribeHandleRequest, opts ...grpc.CallOption) (*DescribeHandleResponse, error) {
+func (c *agentAPIClient) IntrospectHandle(ctx context.Context, in *IntrospectHandleRequest, opts ...grpc.CallOption) (*IntrospectHandleResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(DescribeHandleResponse)
-	err := c.cc.Invoke(ctx, AgentAPI_DescribeHandle_FullMethodName, in, out, cOpts...)
+	out := new(IntrospectHandleResponse)
+	err := c.cc.Invoke(ctx, AgentAPI_IntrospectHandle_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *agentAPIClient) ListHandles(ctx context.Context, in *ListHandlesRequest, opts ...grpc.CallOption) (*ListHandlesResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListHandlesResponse)
+	err := c.cc.Invoke(ctx, AgentAPI_ListHandles_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -178,7 +190,8 @@ func (c *agentAPIClient) GetTrace(ctx context.Context, in *GetTraceRequest, opts
 // for forward compatibility.
 type AgentAPIServer interface {
 	Register(context.Context, *RegisterRequest) (*RegisterResponse, error)
-	DescribeHandle(context.Context, *DescribeHandleRequest) (*DescribeHandleResponse, error)
+	IntrospectHandle(context.Context, *IntrospectHandleRequest) (*IntrospectHandleResponse, error)
+	ListHandles(context.Context, *ListHandlesRequest) (*ListHandlesResponse, error)
 	OpenSession(context.Context, *OpenSessionRequest) (*OpenSessionResponse, error)
 	SendMessage(context.Context, *SendMessageRequest) (*SendMessageResponse, error)
 	Subscribe(*SubscribeRequest, grpc.ServerStreamingServer[IncomingMessage]) error
@@ -200,8 +213,11 @@ type UnimplementedAgentAPIServer struct{}
 func (UnimplementedAgentAPIServer) Register(context.Context, *RegisterRequest) (*RegisterResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method Register not implemented")
 }
-func (UnimplementedAgentAPIServer) DescribeHandle(context.Context, *DescribeHandleRequest) (*DescribeHandleResponse, error) {
-	return nil, status.Error(codes.Unimplemented, "method DescribeHandle not implemented")
+func (UnimplementedAgentAPIServer) IntrospectHandle(context.Context, *IntrospectHandleRequest) (*IntrospectHandleResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method IntrospectHandle not implemented")
+}
+func (UnimplementedAgentAPIServer) ListHandles(context.Context, *ListHandlesRequest) (*ListHandlesResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ListHandles not implemented")
 }
 func (UnimplementedAgentAPIServer) OpenSession(context.Context, *OpenSessionRequest) (*OpenSessionResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method OpenSession not implemented")
@@ -266,20 +282,38 @@ func _AgentAPI_Register_Handler(srv interface{}, ctx context.Context, dec func(i
 	return interceptor(ctx, in, info, handler)
 }
 
-func _AgentAPI_DescribeHandle_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(DescribeHandleRequest)
+func _AgentAPI_IntrospectHandle_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(IntrospectHandleRequest)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
 	if interceptor == nil {
-		return srv.(AgentAPIServer).DescribeHandle(ctx, in)
+		return srv.(AgentAPIServer).IntrospectHandle(ctx, in)
 	}
 	info := &grpc.UnaryServerInfo{
 		Server:     srv,
-		FullMethod: AgentAPI_DescribeHandle_FullMethodName,
+		FullMethod: AgentAPI_IntrospectHandle_FullMethodName,
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(AgentAPIServer).DescribeHandle(ctx, req.(*DescribeHandleRequest))
+		return srv.(AgentAPIServer).IntrospectHandle(ctx, req.(*IntrospectHandleRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _AgentAPI_ListHandles_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListHandlesRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AgentAPIServer).ListHandles(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: AgentAPI_ListHandles_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AgentAPIServer).ListHandles(ctx, req.(*ListHandlesRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -426,8 +460,12 @@ var AgentAPI_ServiceDesc = grpc.ServiceDesc{
 			Handler:    _AgentAPI_Register_Handler,
 		},
 		{
-			MethodName: "DescribeHandle",
-			Handler:    _AgentAPI_DescribeHandle_Handler,
+			MethodName: "IntrospectHandle",
+			Handler:    _AgentAPI_IntrospectHandle_Handler,
+		},
+		{
+			MethodName: "ListHandles",
+			Handler:    _AgentAPI_ListHandles_Handler,
 		},
 		{
 			MethodName: "OpenSession",

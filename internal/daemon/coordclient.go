@@ -7,6 +7,7 @@ import (
 	"time"
 
 	pb "github.com/alexanderfrey/tailbus/api/coordpb"
+	messagepb "github.com/alexanderfrey/tailbus/api/messagepb"
 	"github.com/alexanderfrey/tailbus/internal/handle"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
@@ -42,13 +43,22 @@ func NewCoordClient(coordAddr, nodeID string, pubKey []byte, advertiseAddr strin
 }
 
 // Register registers this node with the coordination server.
-func (c *CoordClient) Register(ctx context.Context, handles []string, descriptions map[string]string) error {
+func (c *CoordClient) Register(ctx context.Context, handles []string, manifests map[string]*messagepb.ServiceManifest) error {
+	// Build deprecated descriptions from manifests for backward compat with old coord servers
+	descs := make(map[string]string, len(manifests))
+	for h, m := range manifests {
+		if m != nil && m.Description != "" {
+			descs[h] = m.Description
+		}
+	}
+
 	resp, err := c.client.RegisterNode(ctx, &pb.RegisterNodeRequest{
-		NodeId:              c.nodeID,
-		PublicKey:           c.pubKey,
-		AdvertiseAddr:       c.addr,
-		Handles:             handles,
-		HandleDescriptions:  descriptions,
+		NodeId:             c.nodeID,
+		PublicKey:          c.pubKey,
+		AdvertiseAddr:      c.addr,
+		Handles:            handles,
+		HandleDescriptions: descs,
+		HandleManifests:    manifests,
 	})
 	if err != nil {
 		return fmt.Errorf("register node: %w", err)
@@ -82,8 +92,13 @@ func (c *CoordClient) WatchPeerMap(ctx context.Context) error {
 					PublicKey:     p.PublicKey,
 					AdvertiseAddr: p.AdvertiseAddr,
 				}
-				if p.HandleDescriptions != nil {
-					info.Description = p.HandleDescriptions[h]
+				// Prefer HandleManifests, fall back to HandleDescriptions
+				if m, ok := p.HandleManifests[h]; ok && m != nil {
+					info.Manifest = protoToHandleManifest(m)
+				} else if p.HandleDescriptions != nil {
+					if desc := p.HandleDescriptions[h]; desc != "" {
+						info.Manifest = handle.ServiceManifest{Description: desc}
+					}
 				}
 				entries[h] = info
 			}
@@ -95,7 +110,7 @@ func (c *CoordClient) WatchPeerMap(ctx context.Context) error {
 
 // Heartbeat sends periodic heartbeats to the coordination server.
 // Blocks until the context is cancelled.
-func (c *CoordClient) Heartbeat(ctx context.Context, getHandles func() []string, getDescriptions func() map[string]string, interval time.Duration) {
+func (c *CoordClient) Heartbeat(ctx context.Context, getHandles func() []string, getManifests func() map[string]*messagepb.ServiceManifest, interval time.Duration) {
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 
@@ -105,11 +120,19 @@ func (c *CoordClient) Heartbeat(ctx context.Context, getHandles func() []string,
 			return
 		case <-ticker.C:
 			handles := getHandles()
-			descriptions := getDescriptions()
+			manifests := getManifests()
+			// Build deprecated descriptions for backward compat
+			descs := make(map[string]string, len(manifests))
+			for h, m := range manifests {
+				if m != nil && m.Description != "" {
+					descs[h] = m.Description
+				}
+			}
 			_, err := c.client.Heartbeat(ctx, &pb.HeartbeatRequest{
 				NodeId:             c.nodeID,
 				Handles:            handles,
-				HandleDescriptions: descriptions,
+				HandleDescriptions: descs,
+				HandleManifests:    manifests,
 			})
 			if err != nil {
 				c.logger.Error("heartbeat failed", "error", err)
@@ -121,4 +144,41 @@ func (c *CoordClient) Heartbeat(ctx context.Context, getHandles func() []string,
 // Close closes the connection.
 func (c *CoordClient) Close() error {
 	return c.conn.Close()
+}
+
+// protoToHandleManifest converts a protobuf ServiceManifest to the Go-native type.
+func protoToHandleManifest(m *messagepb.ServiceManifest) handle.ServiceManifest {
+	if m == nil {
+		return handle.ServiceManifest{}
+	}
+	result := handle.ServiceManifest{
+		Description: m.Description,
+		Tags:        m.Tags,
+		Version:     m.Version,
+	}
+	for _, c := range m.Commands {
+		result.Commands = append(result.Commands, handle.CommandSpec{
+			Name:             c.Name,
+			Description:      c.Description,
+			ParametersSchema: c.ParametersSchema,
+		})
+	}
+	return result
+}
+
+// handleManifestToProto converts a Go-native ServiceManifest to the protobuf type.
+func handleManifestToProto(m handle.ServiceManifest) *messagepb.ServiceManifest {
+	result := &messagepb.ServiceManifest{
+		Description: m.Description,
+		Tags:        m.Tags,
+		Version:     m.Version,
+	}
+	for _, c := range m.Commands {
+		result.Commands = append(result.Commands, &messagepb.CommandSpec{
+			Name:             c.Name,
+			Description:      c.Description,
+			ParametersSchema: c.ParametersSchema,
+		})
+	}
+	return result
 }

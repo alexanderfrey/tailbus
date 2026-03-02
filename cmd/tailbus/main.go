@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"strings"
 
 	agentpb "github.com/alexanderfrey/tailbus/api/agentpb"
 	"google.golang.org/grpc"
@@ -28,7 +29,7 @@ func main() {
 	args := flag.Args()
 	if len(args) == 0 {
 		fmt.Println("Usage: tailbus [command] [args...]")
-		fmt.Println("Commands: register, describe, open, send, subscribe, resolve, sessions, dashboard, trace, agent")
+		fmt.Println("Commands: register, introspect, list, open, send, subscribe, resolve, sessions, dashboard, trace, agent")
 		os.Exit(1)
 	}
 
@@ -59,24 +60,72 @@ func main() {
 		}
 		fmt.Printf("Registered as %q\n", args[1])
 
-	case "describe":
+	case "introspect":
 		if len(args) < 2 {
-			fmt.Println("Usage: tailbus describe <handle>")
+			fmt.Println("Usage: tailbus introspect <handle>")
 			os.Exit(1)
 		}
-		resp, err := client.DescribeHandle(ctx, &agentpb.DescribeHandleRequest{Handle: args[1]})
+		resp, err := client.IntrospectHandle(ctx, &agentpb.IntrospectHandleRequest{Handle: args[1]})
 		if err != nil {
-			logger.Error("describe failed", "error", err)
+			logger.Error("introspect failed", "error", err)
 			os.Exit(1)
 		}
 		if !resp.Found {
 			fmt.Printf("Handle %q not found\n", args[1])
 			os.Exit(1)
 		}
-		if resp.Description == "" {
-			fmt.Printf("%s: (no description)\n", resp.Handle)
+		fmt.Printf("Handle: %s\n", resp.Handle)
+		if resp.Manifest != nil {
+			m := resp.Manifest
+			if m.Description != "" {
+				fmt.Printf("Description: %s\n", m.Description)
+			}
+			if m.Version != "" {
+				fmt.Printf("Version: %s\n", m.Version)
+			}
+			if len(m.Tags) > 0 {
+				fmt.Printf("Tags: %s\n", strings.Join(m.Tags, ", "))
+			}
+			if len(m.Commands) > 0 {
+				fmt.Println("Commands:")
+				for _, c := range m.Commands {
+					if c.Description != "" {
+						fmt.Printf("  %s - %s\n", c.Name, c.Description)
+					} else {
+						fmt.Printf("  %s\n", c.Name)
+					}
+				}
+			}
+		} else if resp.Description != "" {
+			fmt.Printf("Description: %s\n", resp.Description)
 		} else {
-			fmt.Printf("%s: %s\n", resp.Handle, resp.Description)
+			fmt.Println("(no manifest)")
+		}
+
+	case "list":
+		req := &agentpb.ListHandlesRequest{}
+		if len(args) >= 2 {
+			req.Tags = strings.Split(args[1], ",")
+		}
+		resp, err := client.ListHandles(ctx, req)
+		if err != nil {
+			logger.Error("list handles failed", "error", err)
+			os.Exit(1)
+		}
+		if len(resp.Entries) == 0 {
+			fmt.Println("No handles found")
+		} else {
+			for _, e := range resp.Entries {
+				desc := ""
+				if e.Manifest != nil && e.Manifest.Description != "" {
+					desc = " - " + e.Manifest.Description
+				}
+				tags := ""
+				if e.Manifest != nil && len(e.Manifest.Tags) > 0 {
+					tags = " [" + strings.Join(e.Manifest.Tags, ", ") + "]"
+				}
+				fmt.Printf("  %s%s%s\n", e.Handle, desc, tags)
+			}
 		}
 
 	case "open":

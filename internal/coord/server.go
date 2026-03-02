@@ -7,6 +7,7 @@ import (
 	"net"
 
 	pb "github.com/alexanderfrey/tailbus/api/coordpb"
+	messagepb "github.com/alexanderfrey/tailbus/api/messagepb"
 	"google.golang.org/grpc"
 )
 
@@ -48,9 +49,29 @@ func (s *Server) GracefulStop() {
 	s.grpc.GracefulStop()
 }
 
+// synthesizeManifests creates HandleManifests from deprecated HandleDescriptions
+// for backward compatibility with old clients.
+func synthesizeManifests(descriptions map[string]string) map[string]*messagepb.ServiceManifest {
+	if len(descriptions) == 0 {
+		return nil
+	}
+	manifests := make(map[string]*messagepb.ServiceManifest, len(descriptions))
+	for h, d := range descriptions {
+		if d != "" {
+			manifests[h] = &messagepb.ServiceManifest{Description: d}
+		}
+	}
+	return manifests
+}
+
 // RegisterNode handles node registration.
 func (s *Server) RegisterNode(_ context.Context, req *pb.RegisterNodeRequest) (*pb.RegisterNodeResponse, error) {
-	if err := s.registry.RegisterNode(req.NodeId, req.PublicKey, req.AdvertiseAddr, req.Handles, req.HandleDescriptions); err != nil {
+	manifests := req.HandleManifests
+	if len(manifests) == 0 {
+		manifests = synthesizeManifests(req.HandleDescriptions)
+	}
+
+	if err := s.registry.RegisterNode(req.NodeId, req.PublicKey, req.AdvertiseAddr, req.Handles, manifests); err != nil {
 		return &pb.RegisterNodeResponse{Ok: false, Error: err.Error()}, nil
 	}
 
@@ -101,21 +122,37 @@ func (s *Server) LookupHandle(_ context.Context, req *pb.LookupHandleRequest) (*
 	if rec == nil {
 		return &pb.LookupHandleResponse{Found: false}, nil
 	}
+
+	// Build deprecated descriptions from manifests
+	descs := make(map[string]string, len(rec.HandleManifests))
+	for h, m := range rec.HandleManifests {
+		if m != nil && m.Description != "" {
+			descs[h] = m.Description
+		}
+	}
+
 	return &pb.LookupHandleResponse{
 		Found: true,
 		Peer: &pb.PeerInfo{
-			NodeId:            rec.NodeID,
-			PublicKey:         rec.PublicKey,
-			AdvertiseAddr:     rec.AdvertiseAddr,
-			Handles:           rec.Handles,
-			LastHeartbeatUnix: rec.LastHeartbeat.Unix(),
+			NodeId:             rec.NodeID,
+			PublicKey:          rec.PublicKey,
+			AdvertiseAddr:      rec.AdvertiseAddr,
+			Handles:            rec.Handles,
+			LastHeartbeatUnix:  rec.LastHeartbeat.Unix(),
+			HandleDescriptions: descs,
+			HandleManifests:    rec.HandleManifests,
 		},
 	}, nil
 }
 
 // Heartbeat handles node heartbeats.
 func (s *Server) Heartbeat(_ context.Context, req *pb.HeartbeatRequest) (*pb.HeartbeatResponse, error) {
-	if err := s.registry.Heartbeat(req.NodeId, req.Handles, req.HandleDescriptions); err != nil {
+	manifests := req.HandleManifests
+	if len(manifests) == 0 {
+		manifests = synthesizeManifests(req.HandleDescriptions)
+	}
+
+	if err := s.registry.Heartbeat(req.NodeId, req.Handles, manifests); err != nil {
 		return &pb.HeartbeatResponse{Ok: false}, nil
 	}
 

@@ -178,12 +178,12 @@ func TestEndToEnd(t *testing.T) {
 
 	// Manually set up resolver maps (in a real daemon, WatchPeerMap handles this)
 	resolver1.UpdatePeerMap(map[string]handle.PeerInfo{
-		"marketing": {NodeID: "node-1", PublicKey: kp1.Public, AdvertiseAddr: tp1Lis.Addr().String()},
-		"sales":     {NodeID: "node-2", PublicKey: kp2.Public, AdvertiseAddr: tp2Lis.Addr().String()},
+		"marketing": {NodeID: "node-1", PublicKey: kp1.Public, AdvertiseAddr: tp1Lis.Addr().String(), Manifest: handle.ServiceManifest{}},
+		"sales":     {NodeID: "node-2", PublicKey: kp2.Public, AdvertiseAddr: tp2Lis.Addr().String(), Manifest: handle.ServiceManifest{}},
 	})
 	resolver2.UpdatePeerMap(map[string]handle.PeerInfo{
-		"marketing": {NodeID: "node-1", PublicKey: kp1.Public, AdvertiseAddr: tp1Lis.Addr().String()},
-		"sales":     {NodeID: "node-2", PublicKey: kp2.Public, AdvertiseAddr: tp2Lis.Addr().String()},
+		"marketing": {NodeID: "node-1", PublicKey: kp1.Public, AdvertiseAddr: tp1Lis.Addr().String(), Manifest: handle.ServiceManifest{}},
+		"sales":     {NodeID: "node-2", PublicKey: kp2.Public, AdvertiseAddr: tp2Lis.Addr().String(), Manifest: handle.ServiceManifest{}},
 	})
 
 	// --- Connect as agent programs ---

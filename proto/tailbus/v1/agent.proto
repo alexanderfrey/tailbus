@@ -9,7 +9,8 @@ import "google/protobuf/timestamp.proto";
 
 service AgentAPI {
   rpc Register(RegisterRequest) returns (RegisterResponse);
-  rpc DescribeHandle(DescribeHandleRequest) returns (DescribeHandleResponse);
+  rpc IntrospectHandle(IntrospectHandleRequest) returns (IntrospectHandleResponse);
+  rpc ListHandles(ListHandlesRequest) returns (ListHandlesResponse);
   rpc OpenSession(OpenSessionRequest) returns (OpenSessionResponse);
   rpc SendMessage(SendMessageRequest) returns (SendMessageResponse);
   rpc Subscribe(SubscribeRequest) returns (stream IncomingMessage);
@@ -22,22 +23,37 @@ service AgentAPI {
 
 message RegisterRequest {
   string handle = 1;
-  string description = 2;
-}
-
-message DescribeHandleRequest {
-  string handle = 1;
-}
-
-message DescribeHandleResponse {
-  string handle = 1;
-  string description = 2;
-  bool found = 3;
+  string description = 2 [deprecated = true];
+  ServiceManifest manifest = 3;
 }
 
 message RegisterResponse {
   bool ok = 1;
   string error = 2;
+}
+
+message IntrospectHandleRequest {
+  string handle = 1;
+}
+
+message IntrospectHandleResponse {
+  string handle = 1;
+  string description = 2 [deprecated = true];
+  bool found = 3;
+  ServiceManifest manifest = 4;
+}
+
+message ListHandlesRequest {
+  repeated string tags = 1;
+}
+
+message ListHandlesResponse {
+  repeated HandleEntry entries = 1;
+}
+
+message HandleEntry {
+  string handle = 1;
+  ServiceManifest manifest = 2;
 }
 
 message OpenSessionRequest {
@@ -117,7 +133,8 @@ message GetNodeStatusResponse {
 message HandleInfo {
   string name = 1;
   int32 subscriber_count = 2;
-  string description = 3;
+  string description = 3 [deprecated = true];
+  ServiceManifest manifest = 4;
 }
 
 message PeerStatus {

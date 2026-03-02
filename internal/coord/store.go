@@ -5,17 +5,19 @@ import (
 	"fmt"
 	"time"
 
+	messagepb "github.com/alexanderfrey/tailbus/api/messagepb"
 	_ "github.com/mattn/go-sqlite3"
+	"google.golang.org/protobuf/encoding/protojson"
 )
 
 // NodeRecord represents a registered node in the database.
 type NodeRecord struct {
-	NodeID             string
-	PublicKey          []byte
-	AdvertiseAddr      string
-	Handles            []string
-	HandleDescriptions map[string]string
-	LastHeartbeat      time.Time
+	NodeID          string
+	PublicKey       []byte
+	AdvertiseAddr   string
+	Handles         []string
+	HandleManifests map[string]*messagepb.ServiceManifest
+	LastHeartbeat   time.Time
 }
 
 // Store provides SQLite persistence for the coordination server.
@@ -48,15 +50,39 @@ func (s *Store) migrate() error {
 		CREATE TABLE IF NOT EXISTS handles (
 			handle TEXT PRIMARY KEY,
 			node_id TEXT NOT NULL REFERENCES nodes(node_id) ON DELETE CASCADE,
-			description TEXT NOT NULL DEFAULT ''
+			description TEXT NOT NULL DEFAULT '',
+			manifest TEXT NOT NULL DEFAULT '{}'
 		);
 	`)
 	if err != nil {
 		return err
 	}
-	// Additive migration for existing databases.
+	// Additive migrations for existing databases.
 	s.db.Exec("ALTER TABLE handles ADD COLUMN description TEXT NOT NULL DEFAULT ''")
+	s.db.Exec("ALTER TABLE handles ADD COLUMN manifest TEXT NOT NULL DEFAULT '{}'")
 	return nil
+}
+
+func marshalManifest(m *messagepb.ServiceManifest) string {
+	if m == nil {
+		return "{}"
+	}
+	b, err := protojson.Marshal(m)
+	if err != nil {
+		return "{}"
+	}
+	return string(b)
+}
+
+func unmarshalManifest(data string) *messagepb.ServiceManifest {
+	if data == "" || data == "{}" {
+		return nil
+	}
+	m := &messagepb.ServiceManifest{}
+	if err := protojson.Unmarshal([]byte(data), m); err != nil {
+		return nil
+	}
+	return m
 }
 
 // UpsertNode inserts or updates a node record and its handles.
@@ -85,13 +111,18 @@ func (s *Store) UpsertNode(rec *NodeRecord) error {
 		return err
 	}
 
-	// Insert new handles with descriptions
+	// Insert new handles with manifests
 	for _, h := range rec.Handles {
-		desc := ""
-		if rec.HandleDescriptions != nil {
-			desc = rec.HandleDescriptions[h]
+		var m *messagepb.ServiceManifest
+		if rec.HandleManifests != nil {
+			m = rec.HandleManifests[h]
 		}
-		_, err = tx.Exec("INSERT INTO handles (handle, node_id, description) VALUES (?, ?, ?)", h, rec.NodeID, desc)
+		desc := ""
+		if m != nil {
+			desc = m.Description
+		}
+		_, err = tx.Exec("INSERT INTO handles (handle, node_id, description, manifest) VALUES (?, ?, ?, ?)",
+			h, rec.NodeID, desc, marshalManifest(m))
 		if err != nil {
 			return fmt.Errorf("register handle %q: %w", h, err)
 		}
@@ -101,7 +132,7 @@ func (s *Store) UpsertNode(rec *NodeRecord) error {
 }
 
 // UpdateHeartbeat updates the heartbeat timestamp and handles for a node.
-func (s *Store) UpdateHeartbeat(nodeID string, handles []string, descriptions map[string]string) error {
+func (s *Store) UpdateHeartbeat(nodeID string, handles []string, manifests map[string]*messagepb.ServiceManifest) error {
 	tx, err := s.db.Begin()
 	if err != nil {
 		return err
@@ -123,11 +154,16 @@ func (s *Store) UpdateHeartbeat(nodeID string, handles []string, descriptions ma
 		return err
 	}
 	for _, h := range handles {
-		desc := ""
-		if descriptions != nil {
-			desc = descriptions[h]
+		var m *messagepb.ServiceManifest
+		if manifests != nil {
+			m = manifests[h]
 		}
-		_, err = tx.Exec("INSERT OR REPLACE INTO handles (handle, node_id, description) VALUES (?, ?, ?)", h, nodeID, desc)
+		desc := ""
+		if m != nil {
+			desc = m.Description
+		}
+		_, err = tx.Exec("INSERT OR REPLACE INTO handles (handle, node_id, description, manifest) VALUES (?, ?, ?, ?)",
+			h, nodeID, desc, marshalManifest(m))
 		if err != nil {
 			return err
 		}
@@ -157,24 +193,29 @@ func (s *Store) GetAllNodes() ([]*NodeRecord, error) {
 		nodes = append(nodes, &rec)
 	}
 
-	// Load handles with descriptions
-	hrows, err := s.db.Query("SELECT handle, node_id, description FROM handles")
+	// Load handles with manifests
+	hrows, err := s.db.Query("SELECT handle, node_id, description, manifest FROM handles")
 	if err != nil {
 		return nil, err
 	}
 	defer hrows.Close()
 	for hrows.Next() {
-		var handle, nodeID, desc string
-		if err := hrows.Scan(&handle, &nodeID, &desc); err != nil {
+		var h, nodeID, desc, manifestJSON string
+		if err := hrows.Scan(&h, &nodeID, &desc, &manifestJSON); err != nil {
 			return nil, err
 		}
 		if rec, ok := nodeMap[nodeID]; ok {
-			rec.Handles = append(rec.Handles, handle)
-			if desc != "" {
-				if rec.HandleDescriptions == nil {
-					rec.HandleDescriptions = make(map[string]string)
+			rec.Handles = append(rec.Handles, h)
+			m := unmarshalManifest(manifestJSON)
+			// Fall back to description for old rows that have no manifest
+			if m == nil && desc != "" {
+				m = &messagepb.ServiceManifest{Description: desc}
+			}
+			if m != nil {
+				if rec.HandleManifests == nil {
+					rec.HandleManifests = make(map[string]*messagepb.ServiceManifest)
 				}
-				rec.HandleDescriptions[handle] = desc
+				rec.HandleManifests[h] = m
 			}
 		}
 	}
@@ -202,17 +243,24 @@ func (s *Store) LookupHandle(handle string) (*NodeRecord, error) {
 	}
 	rec.LastHeartbeat = time.Unix(ts, 0)
 
-	hrows, err := s.db.Query("SELECT handle FROM handles WHERE node_id = ?", nodeID)
+	hrows, err := s.db.Query("SELECT handle, manifest FROM handles WHERE node_id = ?", nodeID)
 	if err != nil {
 		return nil, err
 	}
 	defer hrows.Close()
 	for hrows.Next() {
-		var h string
-		if err := hrows.Scan(&h); err != nil {
+		var h, manifestJSON string
+		if err := hrows.Scan(&h, &manifestJSON); err != nil {
 			return nil, err
 		}
 		rec.Handles = append(rec.Handles, h)
+		m := unmarshalManifest(manifestJSON)
+		if m != nil {
+			if rec.HandleManifests == nil {
+				rec.HandleManifests = make(map[string]*messagepb.ServiceManifest)
+			}
+			rec.HandleManifests[h] = m
+		}
 	}
 
 	return &rec, nil

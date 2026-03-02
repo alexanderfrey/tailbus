@@ -40,10 +40,10 @@ type AgentServer struct {
 	metrics    *Metrics
 
 	mu              sync.RWMutex
-	handles         map[string]bool                          // registered handles on this node
-	descriptions    map[string]string                        // handle -> description
-	subscribers     map[string][]chan *agentpb.IncomingMessage // handle -> subscriber channels
-	onHandleChange  func(handles []string, descriptions map[string]string) // called when handles change
+	handles         map[string]bool                                                       // registered handles on this node
+	manifests       map[string]*messagepb.ServiceManifest                                 // handle -> manifest
+	subscribers     map[string][]chan *agentpb.IncomingMessage                             // handle -> subscriber channels
+	onHandleChange  func(handles []string, manifests map[string]*messagepb.ServiceManifest) // called when handles change
 
 	// Dashboard dependencies (set via SetDashboardDeps)
 	dashResolver  *handle.Resolver
@@ -55,14 +55,14 @@ type AgentServer struct {
 // NewAgentServer creates a new agent server.
 func NewAgentServer(sessions *session.Store, router Router, activity *ActivityBus, logger *slog.Logger) *AgentServer {
 	s := &AgentServer{
-		logger:       logger,
-		sessions:     sessions,
-		router:       router,
-		activity:     activity,
-		handles:      make(map[string]bool),
-		descriptions: make(map[string]string),
-		subscribers:  make(map[string][]chan *agentpb.IncomingMessage),
-		startedAt:    time.Now(),
+		logger:      logger,
+		sessions:    sessions,
+		router:      router,
+		activity:    activity,
+		handles:     make(map[string]bool),
+		manifests:   make(map[string]*messagepb.ServiceManifest),
+		subscribers: make(map[string][]chan *agentpb.IncomingMessage),
+		startedAt:   time.Now(),
 	}
 
 	gs := grpc.NewServer()
@@ -106,7 +106,7 @@ func (s *AgentServer) SetRouter(r Router) {
 }
 
 // SetOnHandleChange sets a callback invoked when local handles change.
-func (s *AgentServer) SetOnHandleChange(fn func(handles []string, descriptions map[string]string)) {
+func (s *AgentServer) SetOnHandleChange(fn func(handles []string, manifests map[string]*messagepb.ServiceManifest)) {
 	s.onHandleChange = fn
 }
 
@@ -175,26 +175,31 @@ func (s *AgentServer) Register(_ context.Context, req *agentpb.RegisterRequest) 
 	}
 
 	s.handles[req.Handle] = true
-	if req.Description != "" {
-		s.descriptions[req.Handle] = req.Description
+
+	// Build manifest from request: prefer manifest field, fall back to deprecated description
+	if req.Manifest != nil {
+		s.manifests[req.Handle] = req.Manifest
+	} else if req.Description != "" {
+		s.manifests[req.Handle] = &messagepb.ServiceManifest{Description: req.Description}
 	}
+
 	s.logger.Info("agent registered", "handle", req.Handle)
 
 	if s.activity != nil {
 		s.activity.EmitHandleRegistered(req.Handle)
 	}
 
-	// Notify coord about handle change (must copy handles+descriptions while holding lock)
+	// Notify coord about handle change (must copy handles+manifests while holding lock)
 	if s.onHandleChange != nil {
 		handles := make([]string, 0, len(s.handles))
 		for h := range s.handles {
 			handles = append(handles, h)
 		}
-		descs := make(map[string]string, len(s.descriptions))
-		for h, d := range s.descriptions {
-			descs[h] = d
+		mans := make(map[string]*messagepb.ServiceManifest, len(s.manifests))
+		for h, m := range s.manifests {
+			mans[h] = m
 		}
-		go s.onHandleChange(handles, descs)
+		go s.onHandleChange(handles, mans)
 	}
 
 	return &agentpb.RegisterResponse{Ok: true}, nil
@@ -403,14 +408,18 @@ func (s *AgentServer) ListSessions(_ context.Context, req *agentpb.ListSessionsR
 // GetNodeStatus returns a snapshot of the node's current state for the dashboard.
 func (s *AgentServer) GetNodeStatus(_ context.Context, _ *agentpb.GetNodeStatusRequest) (*agentpb.GetNodeStatusResponse, error) {
 	s.mu.RLock()
-	// Build handle infos with subscriber counts and descriptions
+	// Build handle infos with subscriber counts and manifests
 	var handles []*agentpb.HandleInfo
 	for h := range s.handles {
-		handles = append(handles, &agentpb.HandleInfo{
+		hi := &agentpb.HandleInfo{
 			Name:            h,
 			SubscriberCount: int32(len(s.subscribers[h])),
-			Description:     s.descriptions[h],
-		})
+		}
+		if m := s.manifests[h]; m != nil {
+			hi.Manifest = m
+			hi.Description = m.Description // deprecated field for backward compat
+		}
+		handles = append(handles, hi)
 	}
 	s.mu.RUnlock()
 
@@ -509,35 +518,95 @@ func (s *AgentServer) GetTrace(_ context.Context, req *agentpb.GetTraceRequest) 
 	return &agentpb.GetTraceResponse{Spans: spans}, nil
 }
 
-// GetDescriptions returns a snapshot of all handle descriptions.
-func (s *AgentServer) GetDescriptions() map[string]string {
+// GetManifests returns a snapshot of all handle manifests.
+func (s *AgentServer) GetManifests() map[string]*messagepb.ServiceManifest {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	result := make(map[string]string, len(s.descriptions))
-	for h, d := range s.descriptions {
-		result[h] = d
+	result := make(map[string]*messagepb.ServiceManifest, len(s.manifests))
+	for h, m := range s.manifests {
+		result[h] = m
 	}
 	return result
 }
 
-// DescribeHandle returns the description for a handle.
-func (s *AgentServer) DescribeHandle(_ context.Context, req *agentpb.DescribeHandleRequest) (*agentpb.DescribeHandleResponse, error) {
-	// Check local descriptions first
+// IntrospectHandle returns the manifest for a handle.
+func (s *AgentServer) IntrospectHandle(_ context.Context, req *agentpb.IntrospectHandleRequest) (*agentpb.IntrospectHandleResponse, error) {
+	// Check local manifests first
 	s.mu.RLock()
-	desc, ok := s.descriptions[req.Handle]
+	m, ok := s.manifests[req.Handle]
 	s.mu.RUnlock()
 	if ok {
-		return &agentpb.DescribeHandleResponse{Handle: req.Handle, Description: desc, Found: true}, nil
+		resp := &agentpb.IntrospectHandleResponse{Handle: req.Handle, Found: true, Manifest: m}
+		if m != nil {
+			resp.Description = m.Description
+		}
+		return resp, nil
 	}
 
 	// Fall back to resolver (covers remote handles)
 	if s.dashResolver != nil {
-		if d, found := s.dashResolver.GetDescription(req.Handle); found {
-			return &agentpb.DescribeHandleResponse{Handle: req.Handle, Description: d, Found: true}, nil
+		if manifest, found := s.dashResolver.GetManifest(req.Handle); found {
+			pm := handleManifestToProto(manifest)
+			return &agentpb.IntrospectHandleResponse{
+				Handle:      req.Handle,
+				Found:       true,
+				Manifest:    pm,
+				Description: manifest.Description,
+			}, nil
 		}
 	}
 
-	return &agentpb.DescribeHandleResponse{Handle: req.Handle, Found: false}, nil
+	return &agentpb.IntrospectHandleResponse{Handle: req.Handle, Found: false}, nil
+}
+
+// ListHandles returns all known handles, optionally filtered by tags.
+func (s *AgentServer) ListHandles(_ context.Context, req *agentpb.ListHandlesRequest) (*agentpb.ListHandlesResponse, error) {
+	seen := make(map[string]bool)
+	var entries []*agentpb.HandleEntry
+
+	// Local handles
+	s.mu.RLock()
+	for h := range s.handles {
+		m := s.manifests[h]
+		if matchesTagsProto(m, req.Tags) {
+			entries = append(entries, &agentpb.HandleEntry{Handle: h, Manifest: m})
+			seen[h] = true
+		}
+	}
+	s.mu.RUnlock()
+
+	// Remote handles from resolver
+	if s.dashResolver != nil {
+		remote := s.dashResolver.ListHandlesByTags(req.Tags)
+		for h, manifest := range remote {
+			if seen[h] {
+				continue
+			}
+			entries = append(entries, &agentpb.HandleEntry{Handle: h, Manifest: handleManifestToProto(manifest)})
+		}
+	}
+
+	return &agentpb.ListHandlesResponse{Entries: entries}, nil
+}
+
+// matchesTagsProto checks if a protobuf manifest's tags match the required tags.
+func matchesTagsProto(m *messagepb.ServiceManifest, required []string) bool {
+	if len(required) == 0 {
+		return true
+	}
+	if m == nil {
+		return false
+	}
+	tagSet := make(map[string]bool, len(m.Tags))
+	for _, t := range m.Tags {
+		tagSet[t] = true
+	}
+	for _, r := range required {
+		if !tagSet[r] {
+			return false
+		}
+	}
+	return true
 }
 
 // --- @-mention auto-routing ---

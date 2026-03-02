@@ -7,6 +7,7 @@
 package coordpb
 
 import (
+	messagepb "github.com/alexanderfrey/tailbus/api/messagepb"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 	reflect "reflect"
@@ -22,12 +23,14 @@ const (
 )
 
 type RegisterNodeRequest struct {
-	state              protoimpl.MessageState `protogen:"open.v1"`
-	NodeId             string                 `protobuf:"bytes,1,opt,name=node_id,json=nodeId,proto3" json:"node_id,omitempty"`
-	PublicKey          []byte                 `protobuf:"bytes,2,opt,name=public_key,json=publicKey,proto3" json:"public_key,omitempty"`
-	AdvertiseAddr      string                 `protobuf:"bytes,3,opt,name=advertise_addr,json=advertiseAddr,proto3" json:"advertise_addr,omitempty"`
-	Handles            []string               `protobuf:"bytes,4,rep,name=handles,proto3" json:"handles,omitempty"`
-	HandleDescriptions map[string]string      `protobuf:"bytes,5,rep,name=handle_descriptions,json=handleDescriptions,proto3" json:"handle_descriptions,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	NodeId        string                 `protobuf:"bytes,1,opt,name=node_id,json=nodeId,proto3" json:"node_id,omitempty"`
+	PublicKey     []byte                 `protobuf:"bytes,2,opt,name=public_key,json=publicKey,proto3" json:"public_key,omitempty"`
+	AdvertiseAddr string                 `protobuf:"bytes,3,opt,name=advertise_addr,json=advertiseAddr,proto3" json:"advertise_addr,omitempty"`
+	Handles       []string               `protobuf:"bytes,4,rep,name=handles,proto3" json:"handles,omitempty"`
+	// Deprecated: Marked as deprecated in tailbus/v1/coord.proto.
+	HandleDescriptions map[string]string                     `protobuf:"bytes,5,rep,name=handle_descriptions,json=handleDescriptions,proto3" json:"handle_descriptions,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	HandleManifests    map[string]*messagepb.ServiceManifest `protobuf:"bytes,6,rep,name=handle_manifests,json=handleManifests,proto3" json:"handle_manifests,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
 	unknownFields      protoimpl.UnknownFields
 	sizeCache          protoimpl.SizeCache
 }
@@ -90,9 +93,17 @@ func (x *RegisterNodeRequest) GetHandles() []string {
 	return nil
 }
 
+// Deprecated: Marked as deprecated in tailbus/v1/coord.proto.
 func (x *RegisterNodeRequest) GetHandleDescriptions() map[string]string {
 	if x != nil {
 		return x.HandleDescriptions
+	}
+	return nil
+}
+
+func (x *RegisterNodeRequest) GetHandleManifests() map[string]*messagepb.ServiceManifest {
+	if x != nil {
+		return x.HandleManifests
 	}
 	return nil
 }
@@ -246,13 +257,15 @@ func (x *PeerMapUpdate) GetVersion() int64 {
 }
 
 type PeerInfo struct {
-	state              protoimpl.MessageState `protogen:"open.v1"`
-	NodeId             string                 `protobuf:"bytes,1,opt,name=node_id,json=nodeId,proto3" json:"node_id,omitempty"`
-	PublicKey          []byte                 `protobuf:"bytes,2,opt,name=public_key,json=publicKey,proto3" json:"public_key,omitempty"`
-	AdvertiseAddr      string                 `protobuf:"bytes,3,opt,name=advertise_addr,json=advertiseAddr,proto3" json:"advertise_addr,omitempty"`
-	Handles            []string               `protobuf:"bytes,4,rep,name=handles,proto3" json:"handles,omitempty"`
-	LastHeartbeatUnix  int64                  `protobuf:"varint,5,opt,name=last_heartbeat_unix,json=lastHeartbeatUnix,proto3" json:"last_heartbeat_unix,omitempty"`
-	HandleDescriptions map[string]string      `protobuf:"bytes,6,rep,name=handle_descriptions,json=handleDescriptions,proto3" json:"handle_descriptions,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	state             protoimpl.MessageState `protogen:"open.v1"`
+	NodeId            string                 `protobuf:"bytes,1,opt,name=node_id,json=nodeId,proto3" json:"node_id,omitempty"`
+	PublicKey         []byte                 `protobuf:"bytes,2,opt,name=public_key,json=publicKey,proto3" json:"public_key,omitempty"`
+	AdvertiseAddr     string                 `protobuf:"bytes,3,opt,name=advertise_addr,json=advertiseAddr,proto3" json:"advertise_addr,omitempty"`
+	Handles           []string               `protobuf:"bytes,4,rep,name=handles,proto3" json:"handles,omitempty"`
+	LastHeartbeatUnix int64                  `protobuf:"varint,5,opt,name=last_heartbeat_unix,json=lastHeartbeatUnix,proto3" json:"last_heartbeat_unix,omitempty"`
+	// Deprecated: Marked as deprecated in tailbus/v1/coord.proto.
+	HandleDescriptions map[string]string                     `protobuf:"bytes,6,rep,name=handle_descriptions,json=handleDescriptions,proto3" json:"handle_descriptions,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	HandleManifests    map[string]*messagepb.ServiceManifest `protobuf:"bytes,7,rep,name=handle_manifests,json=handleManifests,proto3" json:"handle_manifests,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
 	unknownFields      protoimpl.UnknownFields
 	sizeCache          protoimpl.SizeCache
 }
@@ -322,9 +335,17 @@ func (x *PeerInfo) GetLastHeartbeatUnix() int64 {
 	return 0
 }
 
+// Deprecated: Marked as deprecated in tailbus/v1/coord.proto.
 func (x *PeerInfo) GetHandleDescriptions() map[string]string {
 	if x != nil {
 		return x.HandleDescriptions
+	}
+	return nil
+}
+
+func (x *PeerInfo) GetHandleManifests() map[string]*messagepb.ServiceManifest {
+	if x != nil {
+		return x.HandleManifests
 	}
 	return nil
 }
@@ -426,10 +447,12 @@ func (x *LookupHandleResponse) GetFound() bool {
 }
 
 type HeartbeatRequest struct {
-	state              protoimpl.MessageState `protogen:"open.v1"`
-	NodeId             string                 `protobuf:"bytes,1,opt,name=node_id,json=nodeId,proto3" json:"node_id,omitempty"`
-	Handles            []string               `protobuf:"bytes,2,rep,name=handles,proto3" json:"handles,omitempty"`
-	HandleDescriptions map[string]string      `protobuf:"bytes,3,rep,name=handle_descriptions,json=handleDescriptions,proto3" json:"handle_descriptions,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	state   protoimpl.MessageState `protogen:"open.v1"`
+	NodeId  string                 `protobuf:"bytes,1,opt,name=node_id,json=nodeId,proto3" json:"node_id,omitempty"`
+	Handles []string               `protobuf:"bytes,2,rep,name=handles,proto3" json:"handles,omitempty"`
+	// Deprecated: Marked as deprecated in tailbus/v1/coord.proto.
+	HandleDescriptions map[string]string                     `protobuf:"bytes,3,rep,name=handle_descriptions,json=handleDescriptions,proto3" json:"handle_descriptions,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	HandleManifests    map[string]*messagepb.ServiceManifest `protobuf:"bytes,4,rep,name=handle_manifests,json=handleManifests,proto3" json:"handle_manifests,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
 	unknownFields      protoimpl.UnknownFields
 	sizeCache          protoimpl.SizeCache
 }
@@ -478,9 +501,17 @@ func (x *HeartbeatRequest) GetHandles() []string {
 	return nil
 }
 
+// Deprecated: Marked as deprecated in tailbus/v1/coord.proto.
 func (x *HeartbeatRequest) GetHandleDescriptions() map[string]string {
 	if x != nil {
 		return x.HandleDescriptions
+	}
+	return nil
+}
+
+func (x *HeartbeatRequest) GetHandleManifests() map[string]*messagepb.ServiceManifest {
+	if x != nil {
+		return x.HandleManifests
 	}
 	return nil
 }
@@ -534,17 +565,21 @@ var File_tailbus_v1_coord_proto protoreflect.FileDescriptor
 const file_tailbus_v1_coord_proto_rawDesc = "" +
 	"\n" +
 	"\x16tailbus/v1/coord.proto\x12\n" +
-	"tailbus.v1\"\xbf\x02\n" +
+	"tailbus.v1\x1a\x19tailbus/v1/messages.proto\"\x85\x04\n" +
 	"\x13RegisterNodeRequest\x12\x17\n" +
 	"\anode_id\x18\x01 \x01(\tR\x06nodeId\x12\x1d\n" +
 	"\n" +
 	"public_key\x18\x02 \x01(\fR\tpublicKey\x12%\n" +
 	"\x0eadvertise_addr\x18\x03 \x01(\tR\radvertiseAddr\x12\x18\n" +
-	"\ahandles\x18\x04 \x03(\tR\ahandles\x12h\n" +
-	"\x13handle_descriptions\x18\x05 \x03(\v27.tailbus.v1.RegisterNodeRequest.HandleDescriptionsEntryR\x12handleDescriptions\x1aE\n" +
+	"\ahandles\x18\x04 \x03(\tR\ahandles\x12l\n" +
+	"\x13handle_descriptions\x18\x05 \x03(\v27.tailbus.v1.RegisterNodeRequest.HandleDescriptionsEntryB\x02\x18\x01R\x12handleDescriptions\x12_\n" +
+	"\x10handle_manifests\x18\x06 \x03(\v24.tailbus.v1.RegisterNodeRequest.HandleManifestsEntryR\x0fhandleManifests\x1aE\n" +
 	"\x17HandleDescriptionsEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
-	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"<\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\x1a_\n" +
+	"\x14HandleManifestsEntry\x12\x10\n" +
+	"\x03key\x18\x01 \x01(\tR\x03key\x121\n" +
+	"\x05value\x18\x02 \x01(\v2\x1b.tailbus.v1.ServiceManifestR\x05value:\x028\x01\"<\n" +
 	"\x14RegisterNodeResponse\x12\x0e\n" +
 	"\x02ok\x18\x01 \x01(\bR\x02ok\x12\x14\n" +
 	"\x05error\x18\x02 \x01(\tR\x05error\".\n" +
@@ -552,30 +587,38 @@ const file_tailbus_v1_coord_proto_rawDesc = "" +
 	"\anode_id\x18\x01 \x01(\tR\x06nodeId\"U\n" +
 	"\rPeerMapUpdate\x12*\n" +
 	"\x05peers\x18\x01 \x03(\v2\x14.tailbus.v1.PeerInfoR\x05peers\x12\x18\n" +
-	"\aversion\x18\x02 \x01(\x03R\aversion\"\xd9\x02\n" +
+	"\aversion\x18\x02 \x01(\x03R\aversion\"\x94\x04\n" +
 	"\bPeerInfo\x12\x17\n" +
 	"\anode_id\x18\x01 \x01(\tR\x06nodeId\x12\x1d\n" +
 	"\n" +
 	"public_key\x18\x02 \x01(\fR\tpublicKey\x12%\n" +
 	"\x0eadvertise_addr\x18\x03 \x01(\tR\radvertiseAddr\x12\x18\n" +
 	"\ahandles\x18\x04 \x03(\tR\ahandles\x12.\n" +
-	"\x13last_heartbeat_unix\x18\x05 \x01(\x03R\x11lastHeartbeatUnix\x12]\n" +
-	"\x13handle_descriptions\x18\x06 \x03(\v2,.tailbus.v1.PeerInfo.HandleDescriptionsEntryR\x12handleDescriptions\x1aE\n" +
+	"\x13last_heartbeat_unix\x18\x05 \x01(\x03R\x11lastHeartbeatUnix\x12a\n" +
+	"\x13handle_descriptions\x18\x06 \x03(\v2,.tailbus.v1.PeerInfo.HandleDescriptionsEntryB\x02\x18\x01R\x12handleDescriptions\x12T\n" +
+	"\x10handle_manifests\x18\a \x03(\v2).tailbus.v1.PeerInfo.HandleManifestsEntryR\x0fhandleManifests\x1aE\n" +
 	"\x17HandleDescriptionsEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
-	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"-\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\x1a_\n" +
+	"\x14HandleManifestsEntry\x12\x10\n" +
+	"\x03key\x18\x01 \x01(\tR\x03key\x121\n" +
+	"\x05value\x18\x02 \x01(\v2\x1b.tailbus.v1.ServiceManifestR\x05value:\x028\x01\"-\n" +
 	"\x13LookupHandleRequest\x12\x16\n" +
 	"\x06handle\x18\x01 \x01(\tR\x06handle\"V\n" +
 	"\x14LookupHandleResponse\x12(\n" +
 	"\x04peer\x18\x01 \x01(\v2\x14.tailbus.v1.PeerInfoR\x04peer\x12\x14\n" +
-	"\x05found\x18\x02 \x01(\bR\x05found\"\xf3\x01\n" +
+	"\x05found\x18\x02 \x01(\bR\x05found\"\xb6\x03\n" +
 	"\x10HeartbeatRequest\x12\x17\n" +
 	"\anode_id\x18\x01 \x01(\tR\x06nodeId\x12\x18\n" +
-	"\ahandles\x18\x02 \x03(\tR\ahandles\x12e\n" +
-	"\x13handle_descriptions\x18\x03 \x03(\v24.tailbus.v1.HeartbeatRequest.HandleDescriptionsEntryR\x12handleDescriptions\x1aE\n" +
+	"\ahandles\x18\x02 \x03(\tR\ahandles\x12i\n" +
+	"\x13handle_descriptions\x18\x03 \x03(\v24.tailbus.v1.HeartbeatRequest.HandleDescriptionsEntryB\x02\x18\x01R\x12handleDescriptions\x12\\\n" +
+	"\x10handle_manifests\x18\x04 \x03(\v21.tailbus.v1.HeartbeatRequest.HandleManifestsEntryR\x0fhandleManifests\x1aE\n" +
 	"\x17HandleDescriptionsEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
-	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"#\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\x1a_\n" +
+	"\x14HandleManifestsEntry\x12\x10\n" +
+	"\x03key\x18\x01 \x01(\tR\x03key\x121\n" +
+	"\x05value\x18\x02 \x01(\v2\x1b.tailbus.v1.ServiceManifestR\x05value:\x028\x01\"#\n" +
 	"\x11HeartbeatResponse\x12\x0e\n" +
 	"\x02ok\x18\x01 \x01(\bR\x02ok2\xcf\x02\n" +
 	"\x0fCoordinationAPI\x12Q\n" +
@@ -596,40 +639,50 @@ func file_tailbus_v1_coord_proto_rawDescGZIP() []byte {
 	return file_tailbus_v1_coord_proto_rawDescData
 }
 
-var file_tailbus_v1_coord_proto_msgTypes = make([]protoimpl.MessageInfo, 12)
+var file_tailbus_v1_coord_proto_msgTypes = make([]protoimpl.MessageInfo, 15)
 var file_tailbus_v1_coord_proto_goTypes = []any{
-	(*RegisterNodeRequest)(nil),  // 0: tailbus.v1.RegisterNodeRequest
-	(*RegisterNodeResponse)(nil), // 1: tailbus.v1.RegisterNodeResponse
-	(*WatchPeerMapRequest)(nil),  // 2: tailbus.v1.WatchPeerMapRequest
-	(*PeerMapUpdate)(nil),        // 3: tailbus.v1.PeerMapUpdate
-	(*PeerInfo)(nil),             // 4: tailbus.v1.PeerInfo
-	(*LookupHandleRequest)(nil),  // 5: tailbus.v1.LookupHandleRequest
-	(*LookupHandleResponse)(nil), // 6: tailbus.v1.LookupHandleResponse
-	(*HeartbeatRequest)(nil),     // 7: tailbus.v1.HeartbeatRequest
-	(*HeartbeatResponse)(nil),    // 8: tailbus.v1.HeartbeatResponse
-	nil,                          // 9: tailbus.v1.RegisterNodeRequest.HandleDescriptionsEntry
-	nil,                          // 10: tailbus.v1.PeerInfo.HandleDescriptionsEntry
-	nil,                          // 11: tailbus.v1.HeartbeatRequest.HandleDescriptionsEntry
+	(*RegisterNodeRequest)(nil),       // 0: tailbus.v1.RegisterNodeRequest
+	(*RegisterNodeResponse)(nil),      // 1: tailbus.v1.RegisterNodeResponse
+	(*WatchPeerMapRequest)(nil),       // 2: tailbus.v1.WatchPeerMapRequest
+	(*PeerMapUpdate)(nil),             // 3: tailbus.v1.PeerMapUpdate
+	(*PeerInfo)(nil),                  // 4: tailbus.v1.PeerInfo
+	(*LookupHandleRequest)(nil),       // 5: tailbus.v1.LookupHandleRequest
+	(*LookupHandleResponse)(nil),      // 6: tailbus.v1.LookupHandleResponse
+	(*HeartbeatRequest)(nil),          // 7: tailbus.v1.HeartbeatRequest
+	(*HeartbeatResponse)(nil),         // 8: tailbus.v1.HeartbeatResponse
+	nil,                               // 9: tailbus.v1.RegisterNodeRequest.HandleDescriptionsEntry
+	nil,                               // 10: tailbus.v1.RegisterNodeRequest.HandleManifestsEntry
+	nil,                               // 11: tailbus.v1.PeerInfo.HandleDescriptionsEntry
+	nil,                               // 12: tailbus.v1.PeerInfo.HandleManifestsEntry
+	nil,                               // 13: tailbus.v1.HeartbeatRequest.HandleDescriptionsEntry
+	nil,                               // 14: tailbus.v1.HeartbeatRequest.HandleManifestsEntry
+	(*messagepb.ServiceManifest)(nil), // 15: tailbus.v1.ServiceManifest
 }
 var file_tailbus_v1_coord_proto_depIdxs = []int32{
 	9,  // 0: tailbus.v1.RegisterNodeRequest.handle_descriptions:type_name -> tailbus.v1.RegisterNodeRequest.HandleDescriptionsEntry
-	4,  // 1: tailbus.v1.PeerMapUpdate.peers:type_name -> tailbus.v1.PeerInfo
-	10, // 2: tailbus.v1.PeerInfo.handle_descriptions:type_name -> tailbus.v1.PeerInfo.HandleDescriptionsEntry
-	4,  // 3: tailbus.v1.LookupHandleResponse.peer:type_name -> tailbus.v1.PeerInfo
-	11, // 4: tailbus.v1.HeartbeatRequest.handle_descriptions:type_name -> tailbus.v1.HeartbeatRequest.HandleDescriptionsEntry
-	0,  // 5: tailbus.v1.CoordinationAPI.RegisterNode:input_type -> tailbus.v1.RegisterNodeRequest
-	2,  // 6: tailbus.v1.CoordinationAPI.WatchPeerMap:input_type -> tailbus.v1.WatchPeerMapRequest
-	5,  // 7: tailbus.v1.CoordinationAPI.LookupHandle:input_type -> tailbus.v1.LookupHandleRequest
-	7,  // 8: tailbus.v1.CoordinationAPI.Heartbeat:input_type -> tailbus.v1.HeartbeatRequest
-	1,  // 9: tailbus.v1.CoordinationAPI.RegisterNode:output_type -> tailbus.v1.RegisterNodeResponse
-	3,  // 10: tailbus.v1.CoordinationAPI.WatchPeerMap:output_type -> tailbus.v1.PeerMapUpdate
-	6,  // 11: tailbus.v1.CoordinationAPI.LookupHandle:output_type -> tailbus.v1.LookupHandleResponse
-	8,  // 12: tailbus.v1.CoordinationAPI.Heartbeat:output_type -> tailbus.v1.HeartbeatResponse
-	9,  // [9:13] is the sub-list for method output_type
-	5,  // [5:9] is the sub-list for method input_type
-	5,  // [5:5] is the sub-list for extension type_name
-	5,  // [5:5] is the sub-list for extension extendee
-	0,  // [0:5] is the sub-list for field type_name
+	10, // 1: tailbus.v1.RegisterNodeRequest.handle_manifests:type_name -> tailbus.v1.RegisterNodeRequest.HandleManifestsEntry
+	4,  // 2: tailbus.v1.PeerMapUpdate.peers:type_name -> tailbus.v1.PeerInfo
+	11, // 3: tailbus.v1.PeerInfo.handle_descriptions:type_name -> tailbus.v1.PeerInfo.HandleDescriptionsEntry
+	12, // 4: tailbus.v1.PeerInfo.handle_manifests:type_name -> tailbus.v1.PeerInfo.HandleManifestsEntry
+	4,  // 5: tailbus.v1.LookupHandleResponse.peer:type_name -> tailbus.v1.PeerInfo
+	13, // 6: tailbus.v1.HeartbeatRequest.handle_descriptions:type_name -> tailbus.v1.HeartbeatRequest.HandleDescriptionsEntry
+	14, // 7: tailbus.v1.HeartbeatRequest.handle_manifests:type_name -> tailbus.v1.HeartbeatRequest.HandleManifestsEntry
+	15, // 8: tailbus.v1.RegisterNodeRequest.HandleManifestsEntry.value:type_name -> tailbus.v1.ServiceManifest
+	15, // 9: tailbus.v1.PeerInfo.HandleManifestsEntry.value:type_name -> tailbus.v1.ServiceManifest
+	15, // 10: tailbus.v1.HeartbeatRequest.HandleManifestsEntry.value:type_name -> tailbus.v1.ServiceManifest
+	0,  // 11: tailbus.v1.CoordinationAPI.RegisterNode:input_type -> tailbus.v1.RegisterNodeRequest
+	2,  // 12: tailbus.v1.CoordinationAPI.WatchPeerMap:input_type -> tailbus.v1.WatchPeerMapRequest
+	5,  // 13: tailbus.v1.CoordinationAPI.LookupHandle:input_type -> tailbus.v1.LookupHandleRequest
+	7,  // 14: tailbus.v1.CoordinationAPI.Heartbeat:input_type -> tailbus.v1.HeartbeatRequest
+	1,  // 15: tailbus.v1.CoordinationAPI.RegisterNode:output_type -> tailbus.v1.RegisterNodeResponse
+	3,  // 16: tailbus.v1.CoordinationAPI.WatchPeerMap:output_type -> tailbus.v1.PeerMapUpdate
+	6,  // 17: tailbus.v1.CoordinationAPI.LookupHandle:output_type -> tailbus.v1.LookupHandleResponse
+	8,  // 18: tailbus.v1.CoordinationAPI.Heartbeat:output_type -> tailbus.v1.HeartbeatResponse
+	15, // [15:19] is the sub-list for method output_type
+	11, // [11:15] is the sub-list for method input_type
+	11, // [11:11] is the sub-list for extension type_name
+	11, // [11:11] is the sub-list for extension extendee
+	0,  // [0:11] is the sub-list for field type_name
 }
 
 func init() { file_tailbus_v1_coord_proto_init() }
@@ -643,7 +696,7 @@ func file_tailbus_v1_coord_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_tailbus_v1_coord_proto_rawDesc), len(file_tailbus_v1_coord_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   12,
+			NumMessages:   15,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

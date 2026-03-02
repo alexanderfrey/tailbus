@@ -5,12 +5,27 @@ import (
 	"sync"
 )
 
+// CommandSpec describes a single command an agent supports.
+type CommandSpec struct {
+	Name             string
+	Description      string
+	ParametersSchema string
+}
+
+// ServiceManifest describes an agent's capabilities.
+type ServiceManifest struct {
+	Description string
+	Commands    []CommandSpec
+	Tags        []string
+	Version     string
+}
+
 // PeerInfo holds the network info for a node that serves a given handle.
 type PeerInfo struct {
 	NodeID        string
 	PublicKey     []byte
 	AdvertiseAddr string
-	Description   string
+	Manifest      ServiceManifest
 }
 
 // Resolver resolves handle names to peer info using a cached peer map.
@@ -55,13 +70,45 @@ func (r *Resolver) Resolve(handle string) (PeerInfo, error) {
 	return info, nil
 }
 
-// GetDescription returns the description for a handle, if known.
-func (r *Resolver) GetDescription(handle string) (string, bool) {
+// GetManifest returns the service manifest for a handle, if known.
+func (r *Resolver) GetManifest(handle string) (ServiceManifest, bool) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	info, ok := r.handleTo[handle]
 	if !ok {
-		return "", false
+		return ServiceManifest{}, false
 	}
-	return info.Description, true
+	return info.Manifest, true
+}
+
+// ListHandlesByTags returns all handles whose manifest tags match the given filter.
+// An empty tags slice returns all handles.
+func (r *Resolver) ListHandlesByTags(tags []string) map[string]ServiceManifest {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	result := make(map[string]ServiceManifest)
+	for h, info := range r.handleTo {
+		if matchesTags(info.Manifest.Tags, tags) {
+			result[h] = info.Manifest
+		}
+	}
+	return result
+}
+
+// matchesTags returns true if handleTags contains all of the required tags.
+// An empty required slice matches everything.
+func matchesTags(handleTags, required []string) bool {
+	if len(required) == 0 {
+		return true
+	}
+	tagSet := make(map[string]bool, len(handleTags))
+	for _, t := range handleTags {
+		tagSet[t] = true
+	}
+	for _, r := range required {
+		if !tagSet[r] {
+			return false
+		}
+	}
+	return true
 }

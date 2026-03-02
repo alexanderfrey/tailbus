@@ -184,6 +184,134 @@ func (x *Envelope) GetTraceId() string {
 	return ""
 }
 
+type CommandSpec struct {
+	state            protoimpl.MessageState `protogen:"open.v1"`
+	Name             string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
+	Description      string                 `protobuf:"bytes,2,opt,name=description,proto3" json:"description,omitempty"`
+	ParametersSchema string                 `protobuf:"bytes,3,opt,name=parameters_schema,json=parametersSchema,proto3" json:"parameters_schema,omitempty"` // optional JSON Schema
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
+}
+
+func (x *CommandSpec) Reset() {
+	*x = CommandSpec{}
+	mi := &file_tailbus_v1_messages_proto_msgTypes[1]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *CommandSpec) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CommandSpec) ProtoMessage() {}
+
+func (x *CommandSpec) ProtoReflect() protoreflect.Message {
+	mi := &file_tailbus_v1_messages_proto_msgTypes[1]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CommandSpec.ProtoReflect.Descriptor instead.
+func (*CommandSpec) Descriptor() ([]byte, []int) {
+	return file_tailbus_v1_messages_proto_rawDescGZIP(), []int{1}
+}
+
+func (x *CommandSpec) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+func (x *CommandSpec) GetDescription() string {
+	if x != nil {
+		return x.Description
+	}
+	return ""
+}
+
+func (x *CommandSpec) GetParametersSchema() string {
+	if x != nil {
+		return x.ParametersSchema
+	}
+	return ""
+}
+
+type ServiceManifest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Description   string                 `protobuf:"bytes,1,opt,name=description,proto3" json:"description,omitempty"`
+	Commands      []*CommandSpec         `protobuf:"bytes,2,rep,name=commands,proto3" json:"commands,omitempty"`
+	Tags          []string               `protobuf:"bytes,3,rep,name=tags,proto3" json:"tags,omitempty"`
+	Version       string                 `protobuf:"bytes,4,opt,name=version,proto3" json:"version,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ServiceManifest) Reset() {
+	*x = ServiceManifest{}
+	mi := &file_tailbus_v1_messages_proto_msgTypes[2]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ServiceManifest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ServiceManifest) ProtoMessage() {}
+
+func (x *ServiceManifest) ProtoReflect() protoreflect.Message {
+	mi := &file_tailbus_v1_messages_proto_msgTypes[2]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ServiceManifest.ProtoReflect.Descriptor instead.
+func (*ServiceManifest) Descriptor() ([]byte, []int) {
+	return file_tailbus_v1_messages_proto_rawDescGZIP(), []int{2}
+}
+
+func (x *ServiceManifest) GetDescription() string {
+	if x != nil {
+		return x.Description
+	}
+	return ""
+}
+
+func (x *ServiceManifest) GetCommands() []*CommandSpec {
+	if x != nil {
+		return x.Commands
+	}
+	return nil
+}
+
+func (x *ServiceManifest) GetTags() []string {
+	if x != nil {
+		return x.Tags
+	}
+	return nil
+}
+
+func (x *ServiceManifest) GetVersion() string {
+	if x != nil {
+		return x.Version
+	}
+	return ""
+}
+
 var File_tailbus_v1_messages_proto protoreflect.FileDescriptor
 
 const file_tailbus_v1_messages_proto_rawDesc = "" +
@@ -203,7 +331,16 @@ const file_tailbus_v1_messages_proto_rawDesc = "" +
 	"\fsent_at_unix\x18\a \x01(\x03R\n" +
 	"sentAtUnix\x12,\n" +
 	"\x04type\x18\b \x01(\x0e2\x18.tailbus.v1.EnvelopeTypeR\x04type\x12\x19\n" +
-	"\btrace_id\x18\t \x01(\tR\atraceId*\xa2\x01\n" +
+	"\btrace_id\x18\t \x01(\tR\atraceId\"p\n" +
+	"\vCommandSpec\x12\x12\n" +
+	"\x04name\x18\x01 \x01(\tR\x04name\x12 \n" +
+	"\vdescription\x18\x02 \x01(\tR\vdescription\x12+\n" +
+	"\x11parameters_schema\x18\x03 \x01(\tR\x10parametersSchema\"\x96\x01\n" +
+	"\x0fServiceManifest\x12 \n" +
+	"\vdescription\x18\x01 \x01(\tR\vdescription\x123\n" +
+	"\bcommands\x18\x02 \x03(\v2\x17.tailbus.v1.CommandSpecR\bcommands\x12\x12\n" +
+	"\x04tags\x18\x03 \x03(\tR\x04tags\x12\x18\n" +
+	"\aversion\x18\x04 \x01(\tR\aversion*\xa2\x01\n" +
 	"\fEnvelopeType\x12\x1d\n" +
 	"\x19ENVELOPE_TYPE_UNSPECIFIED\x10\x00\x12\x19\n" +
 	"\x15ENVELOPE_TYPE_MESSAGE\x10\x01\x12\x1e\n" +
@@ -224,18 +361,21 @@ func file_tailbus_v1_messages_proto_rawDescGZIP() []byte {
 }
 
 var file_tailbus_v1_messages_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_tailbus_v1_messages_proto_msgTypes = make([]protoimpl.MessageInfo, 1)
+var file_tailbus_v1_messages_proto_msgTypes = make([]protoimpl.MessageInfo, 3)
 var file_tailbus_v1_messages_proto_goTypes = []any{
-	(EnvelopeType)(0), // 0: tailbus.v1.EnvelopeType
-	(*Envelope)(nil),  // 1: tailbus.v1.Envelope
+	(EnvelopeType)(0),       // 0: tailbus.v1.EnvelopeType
+	(*Envelope)(nil),        // 1: tailbus.v1.Envelope
+	(*CommandSpec)(nil),     // 2: tailbus.v1.CommandSpec
+	(*ServiceManifest)(nil), // 3: tailbus.v1.ServiceManifest
 }
 var file_tailbus_v1_messages_proto_depIdxs = []int32{
 	0, // 0: tailbus.v1.Envelope.type:type_name -> tailbus.v1.EnvelopeType
-	1, // [1:1] is the sub-list for method output_type
-	1, // [1:1] is the sub-list for method input_type
-	1, // [1:1] is the sub-list for extension type_name
-	1, // [1:1] is the sub-list for extension extendee
-	0, // [0:1] is the sub-list for field type_name
+	2, // 1: tailbus.v1.ServiceManifest.commands:type_name -> tailbus.v1.CommandSpec
+	2, // [2:2] is the sub-list for method output_type
+	2, // [2:2] is the sub-list for method input_type
+	2, // [2:2] is the sub-list for extension type_name
+	2, // [2:2] is the sub-list for extension extendee
+	0, // [0:2] is the sub-list for field type_name
 }
 
 func init() { file_tailbus_v1_messages_proto_init() }
@@ -249,7 +389,7 @@ func file_tailbus_v1_messages_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_tailbus_v1_messages_proto_rawDesc), len(file_tailbus_v1_messages_proto_rawDesc)),
 			NumEnums:      1,
-			NumMessages:   1,
+			NumMessages:   3,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

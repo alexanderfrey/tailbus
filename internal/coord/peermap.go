@@ -36,13 +36,21 @@ func (pm *PeerMap) Build() (*pb.PeerMapUpdate, error) {
 
 	var peers []*pb.PeerInfo
 	for _, n := range nodes {
+		// Build deprecated HandleDescriptions from manifests for backward compat
+		descs := make(map[string]string, len(n.HandleManifests))
+		for h, m := range n.HandleManifests {
+			if m != nil && m.Description != "" {
+				descs[h] = m.Description
+			}
+		}
 		peers = append(peers, &pb.PeerInfo{
-			NodeId:              n.NodeID,
-			PublicKey:           n.PublicKey,
-			AdvertiseAddr:       n.AdvertiseAddr,
-			Handles:             n.Handles,
-			LastHeartbeatUnix:   n.LastHeartbeat.Unix(),
-			HandleDescriptions:  n.HandleDescriptions,
+			NodeId:             n.NodeID,
+			PublicKey:          n.PublicKey,
+			AdvertiseAddr:      n.AdvertiseAddr,
+			Handles:            n.Handles,
+			LastHeartbeatUnix:  n.LastHeartbeat.Unix(),
+			HandleDescriptions: descs,
+			HandleManifests:    n.HandleManifests,
 		})
 	}
 
