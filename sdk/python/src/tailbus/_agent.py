@@ -306,7 +306,7 @@ class AsyncAgent:
                     continue
 
                 if isinstance(resp, Message):
-                    await self._dispatch_message(resp)
+                    asyncio.create_task(self._dispatch_message(resp))
                 elif self._pending:
                     future = self._pending.popleft()
                     if not future.cancelled():
@@ -322,8 +322,9 @@ class AsyncAgent:
             result = self._handler(msg)
             if inspect.isawaitable(result):
                 await result
-        except Exception:
-            pass  # Don't let handler errors kill the reader loop
+        except Exception as exc:
+            import sys
+            print(f"[tailbus] handler error: {exc}", file=sys.stderr, flush=True)
 
     def _fail_pending(self, exc: Exception) -> None:
         """Fail all pending futures with the given exception."""

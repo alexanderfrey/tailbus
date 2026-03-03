@@ -96,9 +96,11 @@ The fastest way to try tailbus — a full mesh with MCP gateway in 30 seconds:
 docker compose up --build
 ```
 
-This starts: coord server + 2 daemons + MCP gateway with web UI (port 8080) + 3 example Python agents (calculator, echo, orchestrator).
+This starts: coord server + 2 daemons + MCP gateway with web UI (port 8080) + 4 example Python agents (calculator, echo, orchestrator, LLM assistant).
 
-Open http://localhost:8080 in your browser for the chat UI — select an agent from the sidebar and start chatting.
+Open http://localhost:8080 in your browser for the chat UI — select an agent from the sidebar and start chatting. The web UI auto-generates input forms for agents with structured commands (like calculator).
+
+If you have [LM Studio](https://lmstudio.ai/) running on port 1234, the **assistant** agent will route messages to your local LLM.
 
 Test with curl:
 
@@ -119,6 +121,25 @@ curl -s localhost:8080/mcp \
 curl -s localhost:8080/mcp \
   -d '{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"orchestrator.compute","arguments":{"operation":"multiply","a":6,"b":7}}}' | jq
 ```
+
+## Multi-Agent LLM Collaboration
+
+The `examples/multi-agent/` directory demonstrates three LLM-powered agents collaborating through the mesh — all using a single local LM Studio instance:
+
+| Agent | Role |
+|-------|------|
+| **researcher** | Investigates topics, orchestrates the pipeline |
+| **critic** | Reviews findings for accuracy, completeness, bias |
+| **writer** | Synthesizes research + critique into polished output |
+
+```bash
+cd examples/multi-agent
+docker compose up --build
+```
+
+Open http://localhost:8080, click **researcher**, and ask it to investigate any topic. The pipeline runs: researcher → critic → writer, with each step as a separate LLM call through a separate agent on the mesh.
+
+For cross-network deployment (mesh spanning multiple machines), see `examples/multi-machine/`.
 
 ## Quick Start (from source)
 

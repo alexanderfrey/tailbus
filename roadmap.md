@@ -2,7 +2,7 @@
 
 ## Where we are today
 
-Working MVP with real security, NAT traversal, persistence, and MCP integration: coord server + node daemons + P2P gRPC transport + relay server + CLI + TUI dashboard + Prometheus metrics + distributed tracing + stdio bridge + MCP gateway + Docker Compose. **Phase 1 hardening complete:** mTLS on all connections (P2P, relay, and coord), per-connection handle ownership on the Unix socket, Unix socket token auth, coord admission control (pre-auth tokens), per-session sequence numbers, and delivery ACKs with retry. **Phase 2 reliability:** message persistence via bbolt — sessions and pending messages survive daemon restarts. **Phase 3 NAT traversal:** DERP-style relay server enables message delivery across NAT boundaries. **Phase 4 SDKs:** Python SDK (async/sync, zero deps) wrapping the stdio bridge. **Phase 5 protocol bridges:** MCP gateway exposes handles as MCP tools — any MCP-compatible LLM can use tailbus agents. **Phase 9 observability:** Web chat UI embedded in daemon binary for browser-based agent interaction. **Phase 10 deployment:** Docker Compose with coord + 2 daemons + MCP gateway + web UI + 3 example agents.
+Working MVP with real security, NAT traversal, persistence, and MCP integration: coord server + node daemons + P2P gRPC transport + relay server + CLI + TUI dashboard + Prometheus metrics + distributed tracing + stdio bridge + MCP gateway + Docker Compose. **Phase 1 hardening complete:** mTLS on all connections (P2P, relay, and coord), per-connection handle ownership on the Unix socket, Unix socket token auth, coord admission control (pre-auth tokens), per-session sequence numbers, and delivery ACKs with retry. **Phase 2 reliability:** message persistence via bbolt — sessions and pending messages survive daemon restarts. **Phase 3 NAT traversal:** DERP-style relay server enables message delivery across NAT boundaries. **Phase 4 SDKs:** Python SDK (async/sync, zero deps) wrapping the stdio bridge. **Phase 5 protocol bridges:** MCP gateway exposes handles as MCP tools — any MCP-compatible LLM can use tailbus agents. **Phase 9 observability:** Web chat UI embedded in daemon binary for browser-based agent interaction. **Phase 10 deployment:** Docker Compose with full mesh + web UI + LLM agents; multi-agent LLM collaboration example (researcher/critic/writer pipeline); cross-network deployment templates for multi-machine meshes.
 
 **What works:**
 - Agents register handles, open sessions, exchange messages, resolve conversations
@@ -142,7 +142,7 @@ Working MVP with real security, NAT traversal, persistence, and MCP integration:
 - `AsyncAgent` (async/await) and `SyncAgent` (threading wrapper) with context manager support
 - Full protocol coverage: register (with manifests), open/send/resolve sessions, introspect, list handles/sessions
 - `@agent.on_message` decorator for incoming messages, `run_forever()` for long-running agents
-- FIFO future correlation for request/response; interleaved `Message` events routed to handler
+- FIFO future correlation for request/response; `Message` events dispatched concurrently via `create_task` (supports agent-to-agent delegation without deadlock)
 - Exception hierarchy: `BridgeError`, `BridgeDiedError`, `NotRegisteredError`, `AlreadyRegisteredError`
 - 46 tests (protocol serialization, async agent with mocked subprocess, sync wrapper)
 - Phase 2 (future): native gRPC client using generated protobuf stubs for better performance
@@ -323,10 +323,25 @@ Working MVP with real security, NAT traversal, persistence, and MCP integration:
 
 ### ~~P10.1 — Docker images & compose~~ ✓ DONE
 - Multi-stage `Dockerfile` with `coord`, `daemon`, and `relay` targets
-- `docker-compose.yml`: coord + 2 daemons + MCP gateway (port 8080) + 3 example Python agents
-- Example agents: `calculator` (tool-style with JSON Schema), `echo` (simplest agent), `orchestrator` (multi-agent delegation)
+- `docker-compose.yml`: coord + 2 daemons + MCP gateway + web UI (port 8080) + 4 example agents
+- Example agents: `calculator` (tool-style with JSON Schema), `echo` (simplest agent), `orchestrator` (multi-agent delegation), `assistant` (LLM-powered via LM Studio)
 - `docker compose up --build` → full mesh in 30 seconds
 - Cross-node messaging demonstrated: echo agent on daemon2, others on daemon1
+- Web chat UI with command-aware forms: auto-generates input fields from JSON Schema for structured agents
+
+### ~~P10.5 — Multi-agent LLM example~~ ✓ DONE
+- `examples/multi-agent/`: three LLM-powered agents (researcher, critic, writer) collaborating through the mesh
+- Pipeline: user → researcher (generates findings) → critic (reviews) → writer (polishes) → user
+- All agents share a single LM Studio backend; each has its own system prompt and role
+- Demonstrates agent-to-agent delegation via `open_session` + `pending_responses` future pattern
+- Separate `docker-compose.yml` for standalone deployment
+
+### ~~P10.6 — Cross-network deployment~~ ✓ DONE
+- `examples/multi-machine/`: compose files for running the mesh across multiple physical machines
+- `machine-a.yml`: coord + relay + daemon + LLM agents (primary machine)
+- `machine-b.yml`: daemon + agents, connects to Machine A's coord (secondary machine)
+- Relay included for automatic NAT traversal when direct P2P fails
+- README with firewall notes and step-by-step setup instructions
 
 ### P10.2 — Systemd units
 - `tailbus-coord.service`, `tailbusd.service`

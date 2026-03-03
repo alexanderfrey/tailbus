@@ -21,7 +21,7 @@ import (
 const (
 	mcpProtocolVersion = "2024-11-05"
 	mcpGatewayHandle   = "_mcp_gateway"
-	defaultCallTimeout = 30 * time.Second
+	defaultCallTimeout = 120 * time.Second
 )
 
 // AgentAPI is the interface to the daemon's agent server that the gateway needs.
@@ -48,6 +48,7 @@ type Gateway struct {
 	// subscriber for incoming messages
 	mu       sync.Mutex
 	waiters  map[string]chan *agentpb.IncomingMessage // sessionID -> waiter
+	buffered map[string]*agentpb.IncomingMessage      // early arrivals (before waiter registered)
 }
 
 // NewGateway creates a new MCP gateway.
@@ -57,6 +58,7 @@ func NewGateway(agent AgentAPI, sessions SessionStore, logger *slog.Logger) *Gat
 		sessions: sessions,
 		logger:   logger,
 		waiters:  make(map[string]chan *agentpb.IncomingMessage),
+		buffered: make(map[string]*agentpb.IncomingMessage),
 	}
 }
 
@@ -112,6 +114,9 @@ func (g *Gateway) subscribeLoop(ctx context.Context) {
 				case ch <- msg:
 				default:
 				}
+			} else {
+				// No waiter yet — buffer so callAgent can pick it up
+				g.buffered[sid] = msg
 			}
 			g.mu.Unlock()
 		}
@@ -144,11 +149,17 @@ func (g *Gateway) handleAPIAgents(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	type commandInfo struct {
+		Name             string `json:"name"`
+		Description      string `json:"description"`
+		ParametersSchema string `json:"parametersSchema,omitempty"`
+	}
 	type agentInfo struct {
-		Handle      string   `json:"handle"`
-		Description string   `json:"description"`
-		Tags        []string `json:"tags"`
-		Version     string   `json:"version"`
+		Handle      string        `json:"handle"`
+		Description string        `json:"description"`
+		Tags        []string      `json:"tags"`
+		Version     string        `json:"version"`
+		Commands    []commandInfo `json:"commands,omitempty"`
 	}
 
 	var agents []agentInfo
@@ -161,6 +172,13 @@ func (g *Gateway) handleAPIAgents(w http.ResponseWriter, r *http.Request) {
 			a.Description = entry.Manifest.Description
 			a.Tags = entry.Manifest.Tags
 			a.Version = entry.Manifest.Version
+			for _, cmd := range entry.Manifest.Commands {
+				a.Commands = append(a.Commands, commandInfo{
+					Name:             cmd.Name,
+					Description:      cmd.Description,
+					ParametersSchema: cmd.ParametersSchema,
+				})
+			}
 		}
 		agents = append(agents, a)
 	}
@@ -391,14 +409,19 @@ func (g *Gateway) callAgent(ctx context.Context, targetHandle string, payload []
 
 	sessionID := openResp.SessionId
 
-	// Set up waiter for response
+	// Set up waiter for response and check if it already arrived
 	ch := make(chan *agentpb.IncomingMessage, 1)
 	g.mu.Lock()
 	g.waiters[sessionID] = ch
+	if msg, ok := g.buffered[sessionID]; ok {
+		delete(g.buffered, sessionID)
+		ch <- msg
+	}
 	g.mu.Unlock()
 	defer func() {
 		g.mu.Lock()
 		delete(g.waiters, sessionID)
+		delete(g.buffered, sessionID)
 		g.mu.Unlock()
 	}()
 

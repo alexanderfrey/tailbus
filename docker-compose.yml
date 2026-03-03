@@ -7,7 +7,7 @@
 #   - Coordination server (discovery + peer map)
 #   - Two daemon nodes with P2P connectivity
 #   - MCP gateway + web chat UI on daemon1 (http://localhost:8080)
-#   - Three example Python agents (calculator, echo, orchestrator)
+#   - Four example Python agents (calculator, echo, orchestrator, LLM assistant)
 #
 # Open http://localhost:8080 in your browser for the chat UI.
 #
@@ -54,15 +54,21 @@ services:
     depends_on:
       coord:
         condition: service_healthy
-    command: >
-      tailbusd
-        -node-id daemon1
-        -coord coord:8443
-        -advertise daemon1:9443
-        -listen :9443
-        -socket /var/run/tailbus/tailbusd.sock
-        -metrics :9090
-        -mcp :8080
+    command:
+      - -node-id
+      - daemon1
+      - -coord
+      - coord:8443
+      - -advertise
+      - daemon1:9443
+      - -listen
+      - ":9443"
+      - -socket
+      - /var/run/tailbus/tailbusd.sock
+      - -metrics
+      - ":9090"
+      - -mcp
+      - ":8080"
     healthcheck:
       test: ["CMD", "wget", "-q", "--spider", "http://localhost:9090/readyz"]
       interval: 3s
@@ -116,19 +122,42 @@ services:
     depends_on:
       coord:
         condition: service_healthy
-    command: >
-      tailbusd
-        -node-id daemon2
-        -coord coord:8443
-        -advertise daemon2:9443
-        -listen :9443
-        -socket /var/run/tailbus/tailbusd.sock
-        -metrics :9091
+    command:
+      - -node-id
+      - daemon2
+      - -coord
+      - coord:8443
+      - -advertise
+      - daemon2:9443
+      - -listen
+      - ":9443"
+      - -socket
+      - /var/run/tailbus/tailbusd.sock
+      - -metrics
+      - ":9091"
     healthcheck:
       test: ["CMD", "wget", "-q", "--spider", "http://localhost:9091/readyz"]
       interval: 3s
       timeout: 2s
       retries: 10
+
+  # LLM assistant agent on daemon1 (connects to LM Studio on host)
+  assistant:
+    build:
+      context: .
+      target: daemon
+    volumes:
+      - daemon1-sock:/var/run/tailbus
+      - ./sdk:/sdk:ro
+      - ./examples/docker:/agents:ro
+    depends_on:
+      daemon1:
+        condition: service_healthy
+    entrypoint: ["python3", "/agents/llm_agent.py"]
+    environment:
+      - TAILBUS_SOCKET=/var/run/tailbus/tailbusd.sock
+      - LLM_BASE_URL=http://host.docker.internal:1234/v1
+    restart: on-failure
 
   # Echo agent on daemon2 (demonstrates cross-node messaging)
   echo:

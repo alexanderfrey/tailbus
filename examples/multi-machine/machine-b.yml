@@ -1,0 +1,86 @@
+# Machine B — secondary node: daemon + agents, connects to Machine A's coord
+#
+# This machine runs its own daemon and agents. It connects to Machine A's
+# coordination server for discovery and uses the relay for NAT traversal.
+#
+# Usage:
+#   export COORD_IP=<Machine A's IP>
+#   export HOST_IP=<this machine's LAN/public IP>
+#   docker compose -f machine-b.yml up --build
+#
+# Agents on this machine can talk to agents on Machine A and vice versa.
+# The relay handles NAT traversal if direct P2P connectivity fails.
+
+services:
+  daemon:
+    build:
+      context: ../..
+      target: daemon
+    ports:
+      - "8080:8080"
+      - "9090:9090"
+      - "9443:9443"
+    volumes:
+      - daemon-data:/data
+      - daemon-sock:/var/run/tailbus
+      - ../../sdk:/sdk:ro
+      - ../multi-agent:/agents:ro
+    command:
+      - -node-id
+      - machine-b
+      - -coord
+      - ${COORD_IP:?Set COORD_IP to Machine A address}:8443
+      - -advertise
+      - ${HOST_IP:-localhost}:9443
+      - -listen
+      - ":9443"
+      - -socket
+      - /var/run/tailbus/tailbusd.sock
+      - -metrics
+      - ":9090"
+      - -mcp
+      - ":8080"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:9090/readyz"]
+      interval: 3s
+      timeout: 2s
+      retries: 10
+
+  # Writer agent on Machine B — completes the research pipeline
+  writer:
+    build:
+      context: ../..
+      target: daemon
+    volumes:
+      - daemon-sock:/var/run/tailbus
+      - ../../sdk:/sdk:ro
+      - ../multi-agent:/agents:ro
+    depends_on:
+      daemon:
+        condition: service_healthy
+    entrypoint: ["python3", "/agents/writer_agent.py"]
+    environment:
+      - TAILBUS_SOCKET=/var/run/tailbus/tailbusd.sock
+      - LLM_BASE_URL=http://host.docker.internal:1234/v1
+    restart: on-failure
+
+  # Echo agent — simple connectivity test
+  echo:
+    build:
+      context: ../..
+      target: daemon
+    volumes:
+      - daemon-sock:/var/run/tailbus
+      - ../../sdk:/sdk:ro
+      - ../docker:/agents:ro
+    depends_on:
+      daemon:
+        condition: service_healthy
+    entrypoint: ["python3", "/agents/echo_agent.py"]
+    environment:
+      - TAILBUS_SOCKET=/var/run/tailbus/tailbusd.sock
+    restart: on-failure
+
+volumes:
+  daemon-data:
+  daemon-sock:
