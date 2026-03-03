@@ -9,6 +9,7 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	agentpb "github.com/alexanderfrey/tailbus/api/agentpb"
@@ -19,8 +20,36 @@ import (
 	"github.com/google/uuid"
 	"github.com/prometheus/client_golang/prometheus"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/stats"
+	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
+
+// connIDKey is the context key for connection IDs.
+type connIDKey struct{}
+
+// connTracker implements grpc stats.Handler to track connection lifecycles.
+type connTracker struct {
+	nextID  atomic.Uint64
+	server  *AgentServer
+}
+
+func (ct *connTracker) TagConn(ctx context.Context, _ *stats.ConnTagInfo) context.Context {
+	id := ct.nextID.Add(1)
+	return context.WithValue(ctx, connIDKey{}, id)
+}
+
+func (ct *connTracker) HandleConn(ctx context.Context, s stats.ConnStats) {
+	if _, ok := s.(*stats.ConnEnd); ok {
+		if id, ok := ctx.Value(connIDKey{}).(uint64); ok {
+			ct.server.disconnectConn(id)
+		}
+	}
+}
+
+func (ct *connTracker) TagRPC(ctx context.Context, _ *stats.RPCTagInfo) context.Context { return ctx }
+func (ct *connTracker) HandleRPC(context.Context, stats.RPCStats)                       {}
 
 // Router is the interface the agent server uses to send outbound messages.
 type Router interface {
@@ -45,6 +74,10 @@ type AgentServer struct {
 	subscribers     map[string][]chan *agentpb.IncomingMessage                             // handle -> subscriber channels
 	onHandleChange  func(handles []string, manifests map[string]*messagepb.ServiceManifest) // called when handles change
 
+	// Connection-based handle ownership
+	connHandles map[uint64]map[string]bool // connID -> set of handles
+	handleOwner map[string]uint64          // handle -> owning connID
+
 	// Dashboard dependencies (set via SetDashboardDeps)
 	dashResolver  *handle.Resolver
 	dashTransport *transport.GRPCTransport
@@ -62,10 +95,13 @@ func NewAgentServer(sessions *session.Store, router Router, activity *ActivityBu
 		handles:     make(map[string]bool),
 		manifests:   make(map[string]*messagepb.ServiceManifest),
 		subscribers: make(map[string][]chan *agentpb.IncomingMessage),
+		connHandles: make(map[uint64]map[string]bool),
+		handleOwner: make(map[string]uint64),
 		startedAt:   time.Now(),
 	}
 
-	gs := grpc.NewServer()
+	tracker := &connTracker{server: s}
+	gs := grpc.NewServer(grpc.StatsHandler(tracker))
 	agentpb.RegisterAgentAPIServer(gs, s)
 	s.grpc = gs
 	return s
@@ -108,6 +144,70 @@ func (s *AgentServer) SetRouter(r Router) {
 // SetOnHandleChange sets a callback invoked when local handles change.
 func (s *AgentServer) SetOnHandleChange(fn func(handles []string, manifests map[string]*messagepb.ServiceManifest)) {
 	s.onHandleChange = fn
+}
+
+// connIDFromCtx extracts the connection ID from context.
+func connIDFromCtx(ctx context.Context) (uint64, bool) {
+	id, ok := ctx.Value(connIDKey{}).(uint64)
+	return id, ok
+}
+
+// verifyOwnership checks that the connection in ctx owns the given handle.
+func (s *AgentServer) verifyOwnership(ctx context.Context, handle string) error {
+	connID, ok := connIDFromCtx(ctx)
+	if !ok {
+		return nil // no conn tracking (e.g. tests without stats handler)
+	}
+	s.mu.RLock()
+	owner, exists := s.handleOwner[handle]
+	s.mu.RUnlock()
+	if !exists {
+		return status.Errorf(codes.NotFound, "handle %q is not registered", handle)
+	}
+	if owner != connID {
+		return status.Errorf(codes.PermissionDenied, "handle %q is owned by another connection", handle)
+	}
+	return nil
+}
+
+// disconnectConn removes all handles and closes all subscriber channels for a disconnected connection.
+func (s *AgentServer) disconnectConn(id uint64) {
+	s.mu.Lock()
+	handles := s.connHandles[id]
+	delete(s.connHandles, id)
+
+	var removedHandles []string
+	for h := range handles {
+		delete(s.handles, h)
+		delete(s.manifests, h)
+		delete(s.handleOwner, h)
+		removedHandles = append(removedHandles, h)
+
+		// Close and remove subscriber channels for this handle
+		for _, ch := range s.subscribers[h] {
+			close(ch)
+		}
+		delete(s.subscribers, h)
+	}
+
+	// Snapshot remaining handles/manifests for callback
+	var currentHandles []string
+	currentManifests := make(map[string]*messagepb.ServiceManifest)
+	for h := range s.handles {
+		currentHandles = append(currentHandles, h)
+	}
+	for h, m := range s.manifests {
+		currentManifests[h] = m
+	}
+	cb := s.onHandleChange
+	s.mu.Unlock()
+
+	if len(removedHandles) > 0 {
+		s.logger.Info("connection disconnected, removed handles", "conn_id", id, "handles", removedHandles)
+		if cb != nil {
+			go cb(currentHandles, currentManifests)
+		}
+	}
 }
 
 // GracefulStop stops the server gracefully.
@@ -166,7 +266,7 @@ func (s *AgentServer) HasHandle(h string) bool {
 }
 
 // Register registers an agent handle on this node.
-func (s *AgentServer) Register(_ context.Context, req *agentpb.RegisterRequest) (*agentpb.RegisterResponse, error) {
+func (s *AgentServer) Register(ctx context.Context, req *agentpb.RegisterRequest) (*agentpb.RegisterResponse, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -175,6 +275,15 @@ func (s *AgentServer) Register(_ context.Context, req *agentpb.RegisterRequest) 
 	}
 
 	s.handles[req.Handle] = true
+
+	// Bind handle to connection
+	if connID, ok := connIDFromCtx(ctx); ok {
+		if s.connHandles[connID] == nil {
+			s.connHandles[connID] = make(map[string]bool)
+		}
+		s.connHandles[connID][req.Handle] = true
+		s.handleOwner[req.Handle] = connID
+	}
 
 	// Build manifest from request: prefer manifest field, fall back to deprecated description
 	if req.Manifest != nil {
@@ -207,6 +316,10 @@ func (s *AgentServer) Register(_ context.Context, req *agentpb.RegisterRequest) 
 
 // OpenSession opens a new session and sends the opening message.
 func (s *AgentServer) OpenSession(ctx context.Context, req *agentpb.OpenSessionRequest) (*agentpb.OpenSessionResponse, error) {
+	if err := s.verifyOwnership(ctx, req.FromHandle); err != nil {
+		return nil, err
+	}
+
 	sess := session.New(req.FromHandle, req.ToHandle)
 
 	// Generate or use agent-provided trace ID
@@ -255,6 +368,10 @@ func (s *AgentServer) OpenSession(ctx context.Context, req *agentpb.OpenSessionR
 
 // SendMessage sends a message within an existing session.
 func (s *AgentServer) SendMessage(ctx context.Context, req *agentpb.SendMessageRequest) (*agentpb.SendMessageResponse, error) {
+	if err := s.verifyOwnership(ctx, req.FromHandle); err != nil {
+		return nil, err
+	}
+
 	sess, ok := s.sessions.Get(req.SessionId)
 	if !ok {
 		return nil, fmt.Errorf("session %q not found", req.SessionId)
@@ -299,6 +416,10 @@ func (s *AgentServer) SendMessage(ctx context.Context, req *agentpb.SendMessageR
 
 // Subscribe opens a stream of incoming messages for a handle.
 func (s *AgentServer) Subscribe(req *agentpb.SubscribeRequest, stream agentpb.AgentAPI_SubscribeServer) error {
+	if err := s.verifyOwnership(stream.Context(), req.Handle); err != nil {
+		return err
+	}
+
 	ch := make(chan *agentpb.IncomingMessage, 64)
 
 	s.mu.Lock()
@@ -319,7 +440,10 @@ func (s *AgentServer) Subscribe(req *agentpb.SubscribeRequest, stream agentpb.Ag
 
 	for {
 		select {
-		case msg := <-ch:
+		case msg, ok := <-ch:
+			if !ok {
+				return nil // channel closed (disconnect)
+			}
 			if err := stream.Send(msg); err != nil {
 				return err
 			}
@@ -331,6 +455,10 @@ func (s *AgentServer) Subscribe(req *agentpb.SubscribeRequest, stream agentpb.Ag
 
 // ResolveSession resolves (closes) a session with a final message.
 func (s *AgentServer) ResolveSession(ctx context.Context, req *agentpb.ResolveSessionRequest) (*agentpb.ResolveSessionResponse, error) {
+	if err := s.verifyOwnership(ctx, req.FromHandle); err != nil {
+		return nil, err
+	}
+
 	sess, ok := s.sessions.Get(req.SessionId)
 	if !ok {
 		return nil, fmt.Errorf("session %q not found", req.SessionId)
