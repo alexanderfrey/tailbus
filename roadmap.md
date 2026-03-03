@@ -2,7 +2,7 @@
 
 ## Where we are today
 
-Working MVP with real security and NAT traversal: coord server + node daemons + P2P gRPC transport + relay server + CLI + TUI dashboard + Prometheus metrics + distributed tracing + stdio bridge. **Phase 1 hardening complete:** mTLS on all connections (P2P, relay, and coord), per-connection handle ownership on the Unix socket, Unix socket token auth, per-session sequence numbers, and delivery ACKs with retry. **Phase 3 NAT traversal started:** DERP-style relay server enables message delivery across NAT boundaries. **Operability:** health/readiness endpoints and pprof on all binaries. **Phase 4 SDKs started:** Python SDK (async/sync, zero deps) wrapping the stdio bridge.
+Working MVP with real security and NAT traversal: coord server + node daemons + P2P gRPC transport + relay server + CLI + TUI dashboard + Prometheus metrics + distributed tracing + stdio bridge. **Phase 1 hardening complete:** mTLS on all connections (P2P, relay, and coord), per-connection handle ownership on the Unix socket, Unix socket token auth, coord admission control (pre-auth tokens), per-session sequence numbers, and delivery ACKs with retry. **Phase 3 NAT traversal started:** DERP-style relay server enables message delivery across NAT boundaries. **Operability:** health/readiness endpoints and pprof on all binaries. **Phase 4 SDKs started:** Python SDK (async/sync, zero deps) wrapping the stdio bridge.
 
 **What works:**
 - Agents register handles, open sessions, exchange messages, resolve conversations
@@ -11,6 +11,7 @@ Working MVP with real security and NAT traversal: coord server + node daemons + 
 - DERP-style relay server for NAT traversal — daemons try direct P2P first, fall back to relay transparently
 - Handle ownership is enforced per Unix socket connection (no impersonation)
 - Unix socket token auth — daemon generates a random token file (mode 0600); CLI and agents present it automatically
+- Coord admission control — pre-auth token system gates node registration; open mode (no tokens) preserves zero-config default
 - Every envelope carries a monotonic sequence number; delivered messages generate ACKs; unacked messages retry (5s timeout, 3 retries)
 - `/healthz`, `/readyz`, and `/debug/pprof/*` endpoints on daemon metrics port, coord, and relay
 - Python SDK (`sdk/python/`) — `AsyncAgent` and `SyncAgent` with zero external dependencies
@@ -50,11 +51,12 @@ Working MVP with real security and NAT traversal: coord server + node daemons + 
 - Empty token = no auth (test mode / backward compat)
 - Token file cleaned up on `GracefulStop`
 
-### P1.5 — Coord admission control
-- **Problem:** the coord accepts any node that presents a valid mTLS cert. There's no gating on *who* can join the mesh.
-- Registration token system (like `tailscale up --authkey`) — coord generates pre-auth keys, nodes present them at first registration
-- Public key allowlist/denylist on coord config
-- Foundation for org-level node management
+### ~~P1.5 — Coord admission control~~ ✓ DONE
+- Pre-auth token system (like `tailscale up --authkey`): coord generates tokens, nodes present them at first registration
+- Tokens stored as SHA-256 hashes in SQLite; supports single-use and expiring tokens
+- Open mode preserved: if no tokens configured, all registrations allowed (zero-config default)
+- Closed mode: if any tokens exist, `RegisterNodeRequest.auth_token` must match one
+- `-auth-token` flag and `auth_tokens`/`auth_token` config fields on coord, daemon, and relay
 
 ### P1.6 — Handle namespace policies
 - **Problem:** handle names are first-come-first-served with no revocation or reservation
@@ -348,7 +350,7 @@ Working MVP with real security and NAT traversal: coord server + node daemons + 
 | **P2.4 — Message persistence** | Daemon restart losing all state is not production-grade. ACKs are useless without durable retry. | Large |
 | ~~**P4.1 — Python SDK**~~ | ✓ Done. Async/sync SDK wrapping stdio bridge, zero deps, 46 tests. | ~~Medium~~ |
 | **P2.3 — Backpressure** | Silent message drops are a time bomb. Need explicit signals. | Medium |
-| **P1.5 — Coord admission control** | Prevent unauthorized nodes from joining the mesh. | Small |
+| ~~**P1.5 — Coord admission control**~~ | ✓ Done. Pre-auth token admission on coord. | ~~Small~~ |
 
 ### Soon — Platform Features
 

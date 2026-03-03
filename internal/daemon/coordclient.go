@@ -23,6 +23,7 @@ type CoordClient struct {
 	nodeID        string
 	pubKey        []byte
 	addr          string
+	authToken     string
 	isRelay       bool
 	logger        *slog.Logger
 	resolver      *handle.Resolver
@@ -32,7 +33,8 @@ type CoordClient struct {
 // NewCoordClient creates a new coordination client.
 // If kp is non-nil, mTLS is enabled with TOFU verification of the coord cert
 // using the fingerprint file at coordFPFile.
-func NewCoordClient(coordAddr, nodeID string, pubKey []byte, advertiseAddr string, resolver *handle.Resolver, logger *slog.Logger, kp *identity.Keypair, coordFPFile string) (*CoordClient, error) {
+// authToken is sent with RegisterNode requests for admission control (empty = no token).
+func NewCoordClient(coordAddr, nodeID string, pubKey []byte, advertiseAddr string, resolver *handle.Resolver, logger *slog.Logger, kp *identity.Keypair, coordFPFile string, authToken string) (*CoordClient, error) {
 	var dialOpt grpc.DialOption
 	if kp != nil {
 		cert, err := identity.SelfSignedCert(kp)
@@ -56,13 +58,14 @@ func NewCoordClient(coordAddr, nodeID string, pubKey []byte, advertiseAddr strin
 	}
 
 	return &CoordClient{
-		conn:     conn,
-		client:   pb.NewCoordinationAPIClient(conn),
-		nodeID:   nodeID,
-		pubKey:   pubKey,
-		addr:     advertiseAddr,
-		logger:   logger,
-		resolver: resolver,
+		conn:      conn,
+		client:    pb.NewCoordinationAPIClient(conn),
+		nodeID:    nodeID,
+		pubKey:    pubKey,
+		addr:      advertiseAddr,
+		authToken: authToken,
+		logger:    logger,
+		resolver:  resolver,
 	}, nil
 }
 
@@ -94,6 +97,7 @@ func (c *CoordClient) Register(ctx context.Context, handles []string, manifests 
 		HandleDescriptions: descs,
 		HandleManifests:    manifests,
 		IsRelay:            c.isRelay,
+		AuthToken:          c.authToken,
 	})
 	if err != nil {
 		return fmt.Errorf("register node: %w", err)

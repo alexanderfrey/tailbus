@@ -100,7 +100,7 @@ func TestHeartbeatReRegistersOnNodeNotFound(t *testing.T) {
 	resolver := handle.NewResolver()
 
 	// Use insecure mode (nil keypair) for daemon tests that don't test mTLS
-	cc, err := NewCoordClient(addr, "node-1", []byte("pk"), "10.0.0.1:9443", resolver, logger, nil, "")
+	cc, err := NewCoordClient(addr, "node-1", []byte("pk"), "10.0.0.1:9443", resolver, logger, nil, "", "")
 	if err != nil {
 		t.Fatal(err)
 	}

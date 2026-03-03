@@ -10,9 +10,10 @@ import (
 
 // CoordConfig is the configuration for the coordination server.
 type CoordConfig struct {
-	ListenAddr string `toml:"listen_addr"`
-	DataDir    string `toml:"data_dir"`
-	KeyFile    string `toml:"key_file"`
+	ListenAddr string   `toml:"listen_addr"`
+	DataDir    string   `toml:"data_dir"`
+	KeyFile    string   `toml:"key_file"`
+	AuthTokens []string `toml:"auth_tokens"`
 }
 
 // DaemonConfig is the configuration for a node daemon.
@@ -25,6 +26,7 @@ type DaemonConfig struct {
 	KeyFile       string `toml:"key_file"`
 	DataDir       string `toml:"data_dir"`
 	MetricsAddr   string `toml:"metrics_addr"`
+	AuthToken     string `toml:"auth_token"`
 }
 
 // RelayConfig is the configuration for a relay server.
@@ -33,6 +35,7 @@ type RelayConfig struct {
 	CoordAddr  string `toml:"coord_addr"`
 	ListenAddr string `toml:"listen_addr"`
 	KeyFile    string `toml:"key_file"`
+	AuthToken  string `toml:"auth_token"`
 }
 
 // LoadRelayConfig loads a relay server config from a TOML file.

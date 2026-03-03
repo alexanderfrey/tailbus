@@ -32,6 +32,7 @@ type RegisterNodeRequest struct {
 	HandleDescriptions map[string]string                     `protobuf:"bytes,5,rep,name=handle_descriptions,json=handleDescriptions,proto3" json:"handle_descriptions,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
 	HandleManifests    map[string]*messagepb.ServiceManifest `protobuf:"bytes,6,rep,name=handle_manifests,json=handleManifests,proto3" json:"handle_manifests,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
 	IsRelay            bool                                  `protobuf:"varint,7,opt,name=is_relay,json=isRelay,proto3" json:"is_relay,omitempty"`
+	AuthToken          string                                `protobuf:"bytes,8,opt,name=auth_token,json=authToken,proto3" json:"auth_token,omitempty"`
 	unknownFields      protoimpl.UnknownFields
 	sizeCache          protoimpl.SizeCache
 }
@@ -114,6 +115,13 @@ func (x *RegisterNodeRequest) GetIsRelay() bool {
 		return x.IsRelay
 	}
 	return false
+}
+
+func (x *RegisterNodeRequest) GetAuthToken() string {
+	if x != nil {
+		return x.AuthToken
+	}
+	return ""
 }
 
 type RegisterNodeResponse struct {
@@ -641,7 +649,7 @@ var File_tailbus_v1_coord_proto protoreflect.FileDescriptor
 const file_tailbus_v1_coord_proto_rawDesc = "" +
 	"\n" +
 	"\x16tailbus/v1/coord.proto\x12\n" +
-	"tailbus.v1\x1a\x19tailbus/v1/messages.proto\"\xa0\x04\n" +
+	"tailbus.v1\x1a\x19tailbus/v1/messages.proto\"\xbf\x04\n" +
 	"\x13RegisterNodeRequest\x12\x17\n" +
 	"\anode_id\x18\x01 \x01(\tR\x06nodeId\x12\x1d\n" +
 	"\n" +
@@ -650,7 +658,9 @@ const file_tailbus_v1_coord_proto_rawDesc = "" +
 	"\ahandles\x18\x04 \x03(\tR\ahandles\x12l\n" +
 	"\x13handle_descriptions\x18\x05 \x03(\v27.tailbus.v1.RegisterNodeRequest.HandleDescriptionsEntryB\x02\x18\x01R\x12handleDescriptions\x12_\n" +
 	"\x10handle_manifests\x18\x06 \x03(\v24.tailbus.v1.RegisterNodeRequest.HandleManifestsEntryR\x0fhandleManifests\x12\x19\n" +
-	"\bis_relay\x18\a \x01(\bR\aisRelay\x1aE\n" +
+	"\bis_relay\x18\a \x01(\bR\aisRelay\x12\x1d\n" +
+	"\n" +
+	"auth_token\x18\b \x01(\tR\tauthToken\x1aE\n" +
 	"\x17HandleDescriptionsEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\x1a_\n" +

@@ -28,6 +28,7 @@ func main() {
 	listenAddr := flag.String("listen", ":7443", "relay listen address")
 	keyFile := flag.String("key", "", "path to relay key file")
 	healthAddr := flag.String("health-addr", ":8080", "health endpoint listen address")
+	authToken := flag.String("auth-token", "", "auth token for coord admission control")
 	flag.Parse()
 
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelInfo}))
@@ -45,6 +46,12 @@ func main() {
 		cfg.CoordAddr = *coordAddr
 		cfg.ListenAddr = *listenAddr
 		cfg.KeyFile = *keyFile
+		cfg.AuthToken = *authToken
+	}
+
+	// Flag overrides config file
+	if *authToken != "" {
+		cfg.AuthToken = *authToken
 	}
 
 	if cfg.RelayID == "" {
@@ -78,7 +85,7 @@ func main() {
 
 	// Connect to coord server
 	coordFPFile := filepath.Join(os.TempDir(), "tailbus-relay-"+cfg.RelayID+".coord-fp")
-	cc, err := daemon.NewCoordClient(cfg.CoordAddr, cfg.RelayID, kp.Public, cfg.ListenAddr, resolver, logger.With("component", "coord-client"), kp, coordFPFile)
+	cc, err := daemon.NewCoordClient(cfg.CoordAddr, cfg.RelayID, kp.Public, cfg.ListenAddr, resolver, logger.With("component", "coord-client"), kp, coordFPFile, cfg.AuthToken)
 	if err != nil {
 		logger.Error("failed to create coord client", "error", err)
 		os.Exit(1)

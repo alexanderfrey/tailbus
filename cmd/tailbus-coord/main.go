@@ -3,11 +3,13 @@ package main
 import (
 	"context"
 	"flag"
+	"fmt"
 	"log/slog"
 	"net"
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
@@ -22,6 +24,7 @@ func main() {
 	listenAddr := flag.String("listen", ":8443", "listen address")
 	dataDir := flag.String("data-dir", "", "data directory")
 	healthAddr := flag.String("health-addr", ":8080", "health endpoint listen address")
+	authTokenFlag := flag.String("auth-token", "", "comma-separated pre-auth tokens for admission control")
 	flag.Parse()
 
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelInfo}))
@@ -37,6 +40,16 @@ func main() {
 	} else {
 		cfg.ListenAddr = *listenAddr
 		cfg.DataDir = *dataDir
+	}
+
+	// Merge -auth-token flag into config
+	if *authTokenFlag != "" {
+		for _, tok := range strings.Split(*authTokenFlag, ",") {
+			tok = strings.TrimSpace(tok)
+			if tok != "" {
+				cfg.AuthTokens = append(cfg.AuthTokens, tok)
+			}
+		}
 	}
 
 	if cfg.DataDir == "" {
@@ -71,6 +84,18 @@ func main() {
 	if err != nil {
 		logger.Error("failed to create server", "error", err)
 		os.Exit(1)
+	}
+
+	// Seed auth tokens from config
+	for i, tok := range cfg.AuthTokens {
+		name := fmt.Sprintf("token-%d", i)
+		if err := srv.Admission().SeedToken(name, tok, false); err != nil {
+			logger.Error("failed to seed auth token", "name", name, "error", err)
+			os.Exit(1)
+		}
+	}
+	if len(cfg.AuthTokens) > 0 {
+		logger.Info("admission control enabled", "tokens", len(cfg.AuthTokens))
 	}
 
 	// Start stale-node reaper (90s TTL, 30s sweep)

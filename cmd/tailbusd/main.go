@@ -22,6 +22,7 @@ func main() {
 	socketPath := flag.String("socket", "/tmp/tailbusd.sock", "Unix socket path")
 	keyFile := flag.String("key", "", "path to node key file")
 	metricsAddr := flag.String("metrics", ":9090", "Prometheus metrics listen address (empty to disable)")
+	authToken := flag.String("auth-token", "", "auth token for coord admission control")
 	flag.Parse()
 
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelInfo}))
@@ -42,6 +43,12 @@ func main() {
 		cfg.SocketPath = *socketPath
 		cfg.KeyFile = *keyFile
 		cfg.MetricsAddr = *metricsAddr
+		cfg.AuthToken = *authToken
+	}
+
+	// Flag overrides config file
+	if *authToken != "" {
+		cfg.AuthToken = *authToken
 	}
 
 	if cfg.NodeID == "" {

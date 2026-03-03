@@ -21,6 +21,7 @@ message RegisterNodeRequest {
   map<string, string> handle_descriptions = 5 [deprecated = true];
   map<string, ServiceManifest> handle_manifests = 6;
   bool is_relay = 7;
+  string auth_token = 8;
 }
 
 message RegisterNodeResponse {

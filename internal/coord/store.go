@@ -62,6 +62,21 @@ func (s *Store) migrate() error {
 	s.db.Exec("ALTER TABLE handles ADD COLUMN description TEXT NOT NULL DEFAULT ''")
 	s.db.Exec("ALTER TABLE handles ADD COLUMN manifest TEXT NOT NULL DEFAULT '{}'")
 	s.db.Exec("ALTER TABLE nodes ADD COLUMN is_relay INTEGER NOT NULL DEFAULT 0")
+
+	_, err = s.db.Exec(`
+		CREATE TABLE IF NOT EXISTS auth_tokens (
+			name TEXT PRIMARY KEY,
+			token_hash TEXT NOT NULL UNIQUE,
+			single_use INTEGER NOT NULL DEFAULT 0,
+			used_by TEXT,
+			created_at INTEGER NOT NULL,
+			expires_at INTEGER
+		);
+	`)
+	if err != nil {
+		return fmt.Errorf("create auth_tokens table: %w", err)
+	}
+
 	return nil
 }
 
@@ -290,6 +305,80 @@ func (s *Store) RemoveStaleNodes(olderThan time.Time) (int, error) {
 	}
 	n, _ := res.RowsAffected()
 	return int(n), nil
+}
+
+// InsertAuthToken inserts a new auth token record.
+func (s *Store) InsertAuthToken(name, tokenHash string, singleUse bool, expiresAt *time.Time) error {
+	su := 0
+	if singleUse {
+		su = 1
+	}
+	var exp *int64
+	if expiresAt != nil {
+		v := expiresAt.Unix()
+		exp = &v
+	}
+	_, err := s.db.Exec(
+		"INSERT INTO auth_tokens (name, token_hash, single_use, created_at, expires_at) VALUES (?, ?, ?, ?, ?)",
+		name, tokenHash, su, time.Now().Unix(), exp,
+	)
+	return err
+}
+
+// ValidateAndConsumeToken checks that a token hash exists, is not expired,
+// and has not been consumed (if single-use). If the token is single-use,
+// it marks it as consumed by the given nodeID.
+func (s *Store) ValidateAndConsumeToken(tokenHash, nodeID string) error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	var name string
+	var singleUse int
+	var usedBy sql.NullString
+	var expiresAt sql.NullInt64
+	err = tx.QueryRow(
+		"SELECT name, single_use, used_by, expires_at FROM auth_tokens WHERE token_hash = ?",
+		tokenHash,
+	).Scan(&name, &singleUse, &usedBy, &expiresAt)
+	if err == sql.ErrNoRows {
+		return fmt.Errorf("invalid auth token")
+	}
+	if err != nil {
+		return err
+	}
+
+	if expiresAt.Valid && time.Now().Unix() > expiresAt.Int64 {
+		return fmt.Errorf("auth token %q has expired", name)
+	}
+
+	if singleUse != 0 && usedBy.Valid {
+		return fmt.Errorf("auth token %q has already been used", name)
+	}
+
+	if singleUse != 0 {
+		_, err = tx.Exec("UPDATE auth_tokens SET used_by = ? WHERE token_hash = ?", nodeID, tokenHash)
+		if err != nil {
+			return err
+		}
+	}
+
+	return tx.Commit()
+}
+
+// HasAuthTokens returns true if any auth tokens are configured.
+func (s *Store) HasAuthTokens() (bool, error) {
+	var count int
+	err := s.db.QueryRow("SELECT COUNT(*) FROM auth_tokens").Scan(&count)
+	return count > 0, err
+}
+
+// RevokeAuthToken deletes an auth token by name.
+func (s *Store) RevokeAuthToken(name string) error {
+	_, err := s.db.Exec("DELETE FROM auth_tokens WHERE name = ?", name)
+	return err
 }
 
 // Close closes the database.

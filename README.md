@@ -42,6 +42,7 @@ Think of it as **Slack for autonomous agents** — agents register handles, open
 - **Unix socket token auth** — daemon generates a random auth token file (mode 0600) on startup; CLI and agents present it automatically via gRPC per-RPC credentials; prevents co-tenant handle impersonation
 - **Sequence numbers** — every envelope gets a per-session monotonic sequence number for ordering
 - **Delivery ACKs with retry** — successful delivery generates an ACK back to sender; unacknowledged messages retry with backoff (5s timeout, 3 max retries)
+- **Coord admission control** — pre-auth token system (like `tailscale up --authkey`) gates which nodes can join the mesh; open mode (no tokens configured) preserves zero-config default
 - **Health & readiness endpoints** — `/healthz`, `/readyz`, and `/debug/pprof/*` on daemon metrics port (alongside `/metrics`), coord, and relay servers
 
 ## Install
@@ -216,6 +217,7 @@ Both the coord server and daemon accept TOML config files via `-config`. Example
 listen_addr = ":8443"
 data_dir = "/tmp/tailbus-coord"
 key_file = "/tmp/tailbus-coord/coord.key"
+# auth_tokens = ["changeme"]
 ```
 
 | Field | Default | Description |
@@ -223,12 +225,14 @@ key_file = "/tmp/tailbus-coord/coord.key"
 | `listen_addr` | `:8443` | gRPC listen address |
 | `data_dir` | `.` | Directory for SQLite database (pure-Go, no CGo) |
 | `key_file` | `{data_dir}/coord.key` | Coord keypair file for mTLS (auto-generated if missing) |
+| `auth_tokens` | `[]` | Pre-auth tokens for admission control; if set, nodes must present one to register |
 
 **Flags:**
 
 | Flag | Default | Description |
 |------|---------|-------------|
 | `-health-addr` | `:8080` | Health/readiness/pprof HTTP endpoint (empty string disables) |
+| `-auth-token` | (none) | Comma-separated pre-auth tokens (merged with config file tokens) |
 
 ### Relay server (`tailbus-relay`)
 
@@ -237,6 +241,7 @@ relay_id = "relay-1"
 coord_addr = "127.0.0.1:8443"
 listen_addr = ":7443"
 key_file = "/tmp/tailbus-relay.key"
+# auth_token = "changeme"
 ```
 
 | Field | Default | Description |
@@ -245,12 +250,14 @@ key_file = "/tmp/tailbus-relay.key"
 | `coord_addr` | `127.0.0.1:8443` | Coordination server address |
 | `listen_addr` | `:7443` | gRPC listen address for daemon connections |
 | `key_file` | `/tmp/tailbus-relay-{id}.key` | Relay keypair file (auto-generated if missing) |
+| `auth_token` | (none) | Auth token for coord admission control |
 
 **Flags:**
 
 | Flag | Default | Description |
 |------|---------|-------------|
 | `-health-addr` | `:8080` | Health/readiness/pprof HTTP endpoint (empty string disables) |
+| `-auth-token` | (none) | Auth token for coord admission control |
 
 ### Node daemon (`tailbusd`)
 
@@ -262,6 +269,7 @@ listen_addr = ":9443"
 socket_path = "/tmp/tailbusd-1.sock"
 key_file = "/tmp/tailbusd-node1.key"
 metrics_addr = ":9090"
+# auth_token = "changeme"
 ```
 
 | Field | Default | Description |
@@ -273,6 +281,7 @@ metrics_addr = ":9090"
 | `socket_path` | `/tmp/tailbusd.sock` | Unix socket for local agent connections |
 | `key_file` | `/tmp/tailbusd-{nodeID}.key` | Node keypair file (auto-generated if missing) |
 | `metrics_addr` | `:9090` | Prometheus + health/pprof HTTP endpoint (empty string disables) |
+| `auth_token` | (none) | Auth token for coord admission control |
 
 All config fields can be overridden with command-line flags. Run any binary with `-help` to see available flags.
 

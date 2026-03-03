@@ -20,11 +20,12 @@ import (
 type Server struct {
 	pb.UnimplementedCoordinationAPIServer
 
-	store    *Store
-	registry *Registry
-	peerMap  *PeerMap
-	logger   *slog.Logger
-	grpc     *grpc.Server
+	store     *Store
+	registry  *Registry
+	peerMap   *PeerMap
+	admission *Admission
+	logger    *slog.Logger
+	grpc      *grpc.Server
 }
 
 // NewServer creates a new coordination server.
@@ -34,11 +35,14 @@ func NewServer(store *Store, logger *slog.Logger, kp *identity.Keypair) (*Server
 	registry := NewRegistry(store, logger)
 	peerMap := NewPeerMap(store, logger)
 
+	admission := NewAdmission(store, logger)
+
 	s := &Server{
-		store:    store,
-		registry: registry,
-		peerMap:  peerMap,
-		logger:   logger,
+		store:     store,
+		registry:  registry,
+		peerMap:   peerMap,
+		admission: admission,
+		logger:    logger,
 	}
 
 	var serverOpts []grpc.ServerOption
@@ -66,6 +70,11 @@ func NewServer(store *Store, logger *slog.Logger, kp *identity.Keypair) (*Server
 	pb.RegisterCoordinationAPIServer(gs, s)
 	s.grpc = gs
 	return s, nil
+}
+
+// Admission returns the server's admission controller for token seeding.
+func (s *Server) Admission() *Admission {
+	return s.admission
 }
 
 // Serve starts the gRPC server on the given listener.
@@ -125,6 +134,11 @@ func synthesizeManifests(descriptions map[string]string) map[string]*messagepb.S
 
 // RegisterNode handles node registration.
 func (s *Server) RegisterNode(_ context.Context, req *pb.RegisterNodeRequest) (*pb.RegisterNodeResponse, error) {
+	// Admission control: check auth token before allowing registration
+	if err := s.admission.ValidateRegistration(req.AuthToken, req.NodeId); err != nil {
+		return &pb.RegisterNodeResponse{Ok: false, Error: err.Error()}, nil
+	}
+
 	manifests := req.HandleManifests
 	if len(manifests) == 0 {
 		manifests = synthesizeManifests(req.HandleDescriptions)

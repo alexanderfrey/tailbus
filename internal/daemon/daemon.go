@@ -123,7 +123,7 @@ func (d *Daemon) Run(ctx context.Context) error {
 
 	// Connect to coord server with mTLS + TOFU
 	coordFPFile := filepath.Join(os.TempDir(), "tailbusd-"+d.cfg.NodeID+".coord-fp")
-	cc, err := NewCoordClient(d.cfg.CoordAddr, d.cfg.NodeID, d.keypair.Public, d.cfg.AdvertiseAddr, d.resolver, d.logger, d.keypair, coordFPFile)
+	cc, err := NewCoordClient(d.cfg.CoordAddr, d.cfg.NodeID, d.keypair.Public, d.cfg.AdvertiseAddr, d.resolver, d.logger, d.keypair, coordFPFile, d.cfg.AuthToken)
 	if err != nil {
 		return fmt.Errorf("create coord client: %w", err)
 	}
