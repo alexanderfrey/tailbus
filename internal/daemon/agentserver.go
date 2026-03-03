@@ -2,6 +2,8 @@ package daemon
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"fmt"
 	"log/slog"
 	"net"
@@ -21,6 +23,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/stats"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/timestamppb"
@@ -68,6 +71,10 @@ type AgentServer struct {
 	traceStore *TraceStore
 	metrics    *Metrics
 
+	// Auth token for Unix socket authentication (empty = no auth / test mode)
+	authToken string
+	tokenPath string // path to token file (for cleanup)
+
 	mu              sync.RWMutex
 	handles         map[string]bool                                                       // registered handles on this node
 	manifests       map[string]*messagepb.ServiceManifest                                 // handle -> manifest
@@ -104,10 +111,54 @@ func NewAgentServer(sessions *session.Store, router Router, activity *ActivityBu
 	}
 
 	tracker := &connTracker{server: s}
-	gs := grpc.NewServer(grpc.StatsHandler(tracker))
+	gs := grpc.NewServer(
+		grpc.StatsHandler(tracker),
+		grpc.ChainUnaryInterceptor(s.authUnaryInterceptor),
+		grpc.ChainStreamInterceptor(s.authStreamInterceptor),
+	)
 	agentpb.RegisterAgentAPIServer(gs, s)
 	s.grpc = gs
 	return s
+}
+
+// SetAuthToken sets the auth token for testing (bypasses file-based token generation).
+func (s *AgentServer) SetAuthToken(token string) {
+	s.authToken = token
+}
+
+// checkAuth verifies the authorization token from gRPC metadata.
+// No-op if authToken is empty (test mode / no auth configured).
+func (s *AgentServer) checkAuth(ctx context.Context) error {
+	if s.authToken == "" {
+		return nil
+	}
+	md, ok := metadata.FromIncomingContext(ctx)
+	if !ok {
+		return status.Error(codes.Unauthenticated, "missing metadata")
+	}
+	vals := md.Get("authorization")
+	if len(vals) == 0 {
+		return status.Error(codes.Unauthenticated, "missing authorization token")
+	}
+	token := strings.TrimPrefix(vals[0], "Bearer ")
+	if token != s.authToken {
+		return status.Error(codes.Unauthenticated, "invalid authorization token")
+	}
+	return nil
+}
+
+func (s *AgentServer) authUnaryInterceptor(ctx context.Context, req any, _ *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (any, error) {
+	if err := s.checkAuth(ctx); err != nil {
+		return nil, err
+	}
+	return handler(ctx, req)
+}
+
+func (s *AgentServer) authStreamInterceptor(srv any, ss grpc.ServerStream, _ *grpc.StreamServerInfo, handler grpc.StreamHandler) error {
+	if err := s.checkAuth(ss.Context()); err != nil {
+		return err
+	}
+	return handler(srv, ss)
 }
 
 // SetDashboardDeps sets dependencies needed for dashboard RPCs.
@@ -129,8 +180,24 @@ func (s *AgentServer) SetAckTracker(at *AckTracker) {
 }
 
 // ServeUnix starts the gRPC server on a Unix socket.
+// It generates a random auth token and writes it to <socketPath>.token (mode 0600).
 func (s *AgentServer) ServeUnix(socketPath string) error {
 	os.Remove(socketPath)
+
+	// Generate auth token
+	tokenBytes := make([]byte, 32)
+	if _, err := rand.Read(tokenBytes); err != nil {
+		return fmt.Errorf("generate auth token: %w", err)
+	}
+	token := hex.EncodeToString(tokenBytes)
+	tokenPath := socketPath + ".token"
+	if err := os.WriteFile(tokenPath, []byte(token), 0600); err != nil {
+		return fmt.Errorf("write auth token: %w", err)
+	}
+	s.authToken = token
+	s.tokenPath = tokenPath
+	s.logger.Info("auth token written", "path", tokenPath)
+
 	lis, err := net.Listen("unix", socketPath)
 	if err != nil {
 		return fmt.Errorf("listen unix: %w", err)
@@ -218,9 +285,12 @@ func (s *AgentServer) disconnectConn(id uint64) {
 	}
 }
 
-// GracefulStop stops the server gracefully.
+// GracefulStop stops the server gracefully and removes the auth token file.
 func (s *AgentServer) GracefulStop() {
 	s.grpc.GracefulStop()
+	if s.tokenPath != "" {
+		os.Remove(s.tokenPath)
+	}
 }
 
 // GetHandles returns the list of currently registered handles.

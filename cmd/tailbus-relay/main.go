@@ -15,6 +15,7 @@ import (
 	"github.com/alexanderfrey/tailbus/internal/config"
 	"github.com/alexanderfrey/tailbus/internal/daemon"
 	"github.com/alexanderfrey/tailbus/internal/handle"
+	"github.com/alexanderfrey/tailbus/internal/health"
 	"github.com/alexanderfrey/tailbus/internal/identity"
 	"github.com/alexanderfrey/tailbus/internal/relay"
 	"github.com/alexanderfrey/tailbus/internal/transport"
@@ -26,6 +27,7 @@ func main() {
 	coordAddr := flag.String("coord", "127.0.0.1:8443", "coordination server address")
 	listenAddr := flag.String("listen", ":7443", "relay listen address")
 	keyFile := flag.String("key", "", "path to relay key file")
+	healthAddr := flag.String("health-addr", ":8080", "health endpoint listen address")
 	flag.Parse()
 
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelInfo}))
@@ -98,6 +100,11 @@ func main() {
 	if err := cc.Register(ctx, nil, nil); err != nil {
 		logger.Error("failed to register with coord", "error", err)
 		os.Exit(1)
+	}
+
+	// Start health server
+	if *healthAddr != "" {
+		go health.Serve(ctx, *healthAddr, func() bool { return true }, logger)
 	}
 
 	// Watch peer map in background (updates resolver for verifier)

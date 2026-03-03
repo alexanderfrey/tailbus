@@ -138,6 +138,9 @@ func (d *Daemon) Run(ctx context.Context) error {
 		return fmt.Errorf("register with coord: %w", err)
 	}
 
+	// Signal readiness after successful coord registration
+	d.metrics.SetReadyFunc(func() bool { return true })
+
 	// When local handles change, re-register with coord so peer map updates immediately
 	d.agentServer.SetOnHandleChange(func(handles []string, manifests map[string]*messagepb.ServiceManifest) {
 		if err := cc.Register(ctx, handles, manifests); err != nil {

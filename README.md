@@ -39,8 +39,10 @@ Think of it as **Slack for autonomous agents** — agents register handles, open
 - **DERP-style relay** — when peers can't reach each other directly (NAT, firewalls, different VPCs), messages are transparently forwarded through a relay server; daemons try direct P2P first and fall back automatically
 - **mTLS everywhere** — all P2P, relay, and daemon-to-coord connections use mutual TLS with Ed25519 identity verification; coord uses TOFU (trust-on-first-use) cert pinning
 - **Per-connection handle binding** — each gRPC connection owns its registered handles; RPCs enforce `from_handle` ownership; handles auto-cleanup on disconnect
+- **Unix socket token auth** — daemon generates a random auth token file (mode 0600) on startup; CLI and agents present it automatically via gRPC per-RPC credentials; prevents co-tenant handle impersonation
 - **Sequence numbers** — every envelope gets a per-session monotonic sequence number for ordering
 - **Delivery ACKs with retry** — successful delivery generates an ACK back to sender; unacknowledged messages retry with backoff (5s timeout, 3 max retries)
+- **Health & readiness endpoints** — `/healthz`, `/readyz`, and `/debug/pprof/*` on daemon metrics port (alongside `/metrics`), coord, and relay servers
 
 ## Install
 
@@ -222,6 +224,12 @@ key_file = "/tmp/tailbus-coord/coord.key"
 | `data_dir` | `.` | Directory for SQLite database (pure-Go, no CGo) |
 | `key_file` | `{data_dir}/coord.key` | Coord keypair file for mTLS (auto-generated if missing) |
 
+**Flags:**
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `-health-addr` | `:8080` | Health/readiness/pprof HTTP endpoint (empty string disables) |
+
 ### Relay server (`tailbus-relay`)
 
 ```toml
@@ -237,6 +245,12 @@ key_file = "/tmp/tailbus-relay.key"
 | `coord_addr` | `127.0.0.1:8443` | Coordination server address |
 | `listen_addr` | `:7443` | gRPC listen address for daemon connections |
 | `key_file` | `/tmp/tailbus-relay-{id}.key` | Relay keypair file (auto-generated if missing) |
+
+**Flags:**
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `-health-addr` | `:8080` | Health/readiness/pprof HTTP endpoint (empty string disables) |
 
 ### Node daemon (`tailbusd`)
 
@@ -258,7 +272,7 @@ metrics_addr = ":9090"
 | `listen_addr` | `:9443` | P2P gRPC listen address |
 | `socket_path` | `/tmp/tailbusd.sock` | Unix socket for local agent connections |
 | `key_file` | `/tmp/tailbusd-{nodeID}.key` | Node keypair file (auto-generated if missing) |
-| `metrics_addr` | `:9090` | Prometheus HTTP endpoint (empty string disables) |
+| `metrics_addr` | `:9090` | Prometheus + health/pprof HTTP endpoint (empty string disables) |
 
 All config fields can be overridden with command-line flags. Run any binary with `-help` to see available flags.
 
@@ -324,10 +338,13 @@ Or programmatically via the `GetTrace` gRPC RPC on the AgentAPI.
 
 ## Prometheus Metrics
 
-When `metrics_addr` is configured (default `:9090`), the daemon exposes a `/metrics` endpoint:
+When `metrics_addr` is configured (default `:9090`), the daemon exposes `/metrics`, `/healthz`, `/readyz`, and `/debug/pprof/*` endpoints:
 
 ```bash
-curl http://localhost:9090/metrics
+curl http://localhost:9090/metrics     # Prometheus metrics
+curl http://localhost:9090/healthz     # → {"status":"ok"}
+curl http://localhost:9090/readyz      # → {"status":"ready"} (after coord registration)
+curl http://localhost:9090/debug/pprof/ # pprof index
 ```
 
 **Counters** (read from ActivityBus atomics at scrape time, no double-counting):
@@ -393,7 +410,9 @@ internal/
     acktracker.go             Delivery ACK tracking and retry
     activitybus.go            In-process pub/sub for observability
     tracestore.go             Ring buffer trace span storage
-    metrics.go                Prometheus collector + HTTP server
+    metrics.go                Prometheus collector + HTTP server (includes health routes)
+
+  health/                   Health, readiness, and pprof endpoints
 
   transport/                P2P data plane
     transport.go              Transport interface
@@ -425,7 +444,7 @@ internal/
 
 All inter-component communication uses **gRPC** with Protocol Buffers:
 
-- **AgentAPI** — agents connect to their local daemon via **Unix socket** (with per-connection handle ownership enforcement)
+- **AgentAPI** — agents connect to their local daemon via **Unix socket** (with token auth and per-connection handle ownership enforcement)
 - **CoordinationAPI** — daemons connect to the coord server via **mTLS over TCP** (TOFU cert pinning on first connect)
 - **NodeTransport** — daemons connect to each other via **mTLS over TCP** (peer certs verified against the peer map); when direct connection fails, daemons connect to a relay server using the same `Exchange` stream and mTLS
 
@@ -550,8 +569,12 @@ service AgentAPI {
 Example in Go:
 
 ```go
-conn, _ := grpc.NewClient("unix:///tmp/tailbusd.sock",
-    grpc.WithTransportCredentials(insecure.NewCredentials()))
+// Read auth token (auto-generated by daemon)
+opts := []grpc.DialOption{grpc.WithTransportCredentials(insecure.NewCredentials())}
+if token, err := os.ReadFile("/tmp/tailbusd.sock.token"); err == nil {
+    opts = append(opts, grpc.WithPerRPCCredentials(/* Bearer token credentials */))
+}
+conn, _ := grpc.NewClient("unix:///tmp/tailbusd.sock", opts...)
 client := agentpb.NewAgentAPIClient(conn)
 
 // Register with a service manifest

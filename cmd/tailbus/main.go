@@ -14,6 +14,15 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 )
 
+// tokenCreds implements grpc.PerRPCCredentials for Bearer token auth.
+type tokenCreds struct{ token string }
+
+func (t tokenCreds) GetRequestMetadata(_ context.Context, _ ...string) (map[string]string, error) {
+	return map[string]string{"authorization": "Bearer " + t.token}, nil
+}
+
+func (t tokenCreds) RequireTransportSecurity() bool { return false }
+
 func short(id string) string {
 	if len(id) > 8 {
 		return id[:8]
@@ -34,7 +43,11 @@ func main() {
 		os.Exit(1)
 	}
 
-	conn, err := grpc.NewClient("unix://"+*socketPath, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	dialOpts := []grpc.DialOption{grpc.WithTransportCredentials(insecure.NewCredentials())}
+	if tokenData, err := os.ReadFile(*socketPath + ".token"); err == nil {
+		dialOpts = append(dialOpts, grpc.WithPerRPCCredentials(tokenCreds{token: string(tokenData)}))
+	}
+	conn, err := grpc.NewClient("unix://"+*socketPath, dialOpts...)
 	if err != nil {
 		logger.Error("failed to connect to daemon", "error", err)
 		os.Exit(1)

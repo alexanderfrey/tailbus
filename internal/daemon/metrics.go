@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"net/http"
 
+	"github.com/alexanderfrey/tailbus/internal/health"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
@@ -26,6 +27,14 @@ type Metrics struct {
 	// Histograms (observed explicitly)
 	MessageRoutingDuration *prometheus.Histogram
 	SessionLifetime        *prometheus.Histogram
+
+	// Health readiness function
+	readyFn func() bool
+}
+
+// SetReadyFunc sets the readiness check function for /readyz.
+func (m *Metrics) SetReadyFunc(fn func() bool) {
+	m.readyFn = fn
 }
 
 // NewMetrics creates a new Metrics instance backed by the given ActivityBus.
@@ -88,6 +97,7 @@ func (m *Metrics) Serve(ctx context.Context, addr string, logger *slog.Logger) {
 
 	mux := http.NewServeMux()
 	mux.Handle("/metrics", promhttp.HandlerFor(reg, promhttp.HandlerOpts{}))
+	health.RegisterRoutes(mux, m.readyFn)
 
 	srv := &http.Server{Addr: addr, Handler: mux}
 

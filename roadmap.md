@@ -2,7 +2,7 @@
 
 ## Where we are today
 
-Working MVP with real security and NAT traversal: coord server + node daemons + P2P gRPC transport + relay server + CLI + TUI dashboard + Prometheus metrics + distributed tracing + stdio bridge. **Phase 1 hardening complete:** mTLS on all connections (P2P, relay, and coord), per-connection handle ownership on the Unix socket, per-session sequence numbers, and delivery ACKs with retry. **Phase 3 NAT traversal started:** DERP-style relay server enables message delivery across NAT boundaries.
+Working MVP with real security and NAT traversal: coord server + node daemons + P2P gRPC transport + relay server + CLI + TUI dashboard + Prometheus metrics + distributed tracing + stdio bridge. **Phase 1 hardening complete:** mTLS on all connections (P2P, relay, and coord), per-connection handle ownership on the Unix socket, Unix socket token auth, per-session sequence numbers, and delivery ACKs with retry. **Phase 3 NAT traversal started:** DERP-style relay server enables message delivery across NAT boundaries. **Operability:** health/readiness endpoints and pprof on all binaries.
 
 **What works:**
 - Agents register handles, open sessions, exchange messages, resolve conversations
@@ -10,12 +10,13 @@ Working MVP with real security and NAT traversal: coord server + node daemons + 
 - All daemon-to-coord traffic is mTLS with TOFU cert pinning
 - DERP-style relay server for NAT traversal — daemons try direct P2P first, fall back to relay transparently
 - Handle ownership is enforced per Unix socket connection (no impersonation)
+- Unix socket token auth — daemon generates a random token file (mode 0600); CLI and agents present it automatically
 - Every envelope carries a monotonic sequence number; delivered messages generate ACKs; unacked messages retry (5s timeout, 3 retries)
+- `/healthz`, `/readyz`, and `/debug/pprof/*` endpoints on daemon metrics port, coord, and relay
 - Service manifests, @-mention routing, tracing, Prometheus metrics, TUI dashboard
 
 **What's missing for real adoption:**
 - No persistence — daemon restart loses all sessions and pending messages
-- No Unix socket authentication — any process with fs access can connect
 - No SDKs beyond Go — agents must use the JSON-lines subprocess bridge
 - No federation — `name@domain` is parsed but routing is single-coord only
 
@@ -41,11 +42,12 @@ Working MVP with real security and NAT traversal: coord server + node daemons + 
 - `Register` binds handles to connections; `verifyOwnership` guards all RPCs
 - Disconnect auto-cleans handles and subscriber channels
 
-### P1.4 — Unix socket authentication
-- **Problem:** any process with filesystem access to the socket can connect and register any handle name. All the mTLS work is undermined if a co-tenant process can impersonate handles locally.
-- SO_PEERCRED / peer PID verification on Linux (get calling process UID/GID)
-- Alternatively: daemon generates a random auth token file (mode 0600) on startup; agents must present the token on first RPC
-- Future: plug into org IdP via OIDC for multi-user machines
+### ~~P1.4 — Unix socket authentication~~ ✓ DONE
+- Daemon generates a 32-byte random auth token on `ServeUnix`, writes to `<socket>.token` (mode 0600)
+- gRPC unary + stream interceptors verify `Bearer <token>` from metadata
+- CLI and agent bridge auto-read the token file and attach per-RPC credentials
+- Empty token = no auth (test mode / backward compat)
+- Token file cleaned up on `GracefulStop`
 
 ### P1.5 — Coord admission control
 - **Problem:** the coord accepts any node that presents a valid mTLS cert. There's no gating on *who* can join the mesh.
@@ -275,10 +277,11 @@ Working MVP with real security and NAT traversal: coord server + node daemons + 
 - Trace ID propagation already works — just needs an OTEL bridge
 - Cross-node trace correlation becomes automatic (currently requires querying each node)
 
-### P9.2 — Health endpoints + pprof
-- `/healthz` and `/readyz` on the metrics port
-- `net/http/pprof` for runtime profiling
-- Trivial to add, operators expect them
+### ~~P9.2 — Health endpoints + pprof~~ ✓ DONE
+- `internal/health` package: `RegisterRoutes(mux, readyFn)` and `Serve(ctx, addr, readyFn, logger)`
+- `/healthz` → always 200; `/readyz` → calls readyFn (503 if not ready); `/debug/pprof/*` for profiling
+- Daemon: routes added to existing metrics HTTP server; readyFn set after coord registration
+- Coord and relay: standalone health server via `-health-addr` flag (default `:8080`)
 
 ### P9.3 — Structured event log
 - Every routing decision, connection, registration as structured JSON
@@ -331,8 +334,8 @@ Working MVP with real security and NAT traversal: coord server + node daemons + 
 | Item | Why | Effort |
 |------|-----|--------|
 | ~~**P3.1 — Relay server**~~ | ✓ Done. NAT traversal works via DERP-style relay. | ~~Large~~ |
-| **P1.4 — Unix socket auth** | Security hole that undermines all the mTLS work. Any co-tenant process can impersonate handles. | Small |
-| **P9.2 — Health endpoints** | Trivial to add, operators expect them from day one. | Tiny |
+| ~~**P1.4 — Unix socket auth**~~ | ✓ Done. Token-file auth on Unix socket. | ~~Small~~ |
+| ~~**P9.2 — Health endpoints**~~ | ✓ Done. `/healthz`, `/readyz`, pprof on all binaries. | ~~Tiny~~ |
 
 ### Next — Reliability & Developer Experience
 

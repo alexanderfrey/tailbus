@@ -13,6 +13,7 @@ import (
 
 	"github.com/alexanderfrey/tailbus/internal/config"
 	"github.com/alexanderfrey/tailbus/internal/coord"
+	"github.com/alexanderfrey/tailbus/internal/health"
 	"github.com/alexanderfrey/tailbus/internal/identity"
 )
 
@@ -20,6 +21,7 @@ func main() {
 	configPath := flag.String("config", "", "path to config file")
 	listenAddr := flag.String("listen", ":8443", "listen address")
 	dataDir := flag.String("data-dir", "", "data directory")
+	healthAddr := flag.String("health-addr", ":8080", "health endpoint listen address")
 	flag.Parse()
 
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelInfo}))
@@ -80,6 +82,11 @@ func main() {
 	if err != nil {
 		logger.Error("failed to listen", "error", err)
 		os.Exit(1)
+	}
+
+	// Start health server
+	if *healthAddr != "" {
+		go health.Serve(ctx, *healthAddr, func() bool { return true }, logger)
 	}
 
 	sigCh := make(chan os.Signal, 1)
