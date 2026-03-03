@@ -31,7 +31,10 @@ Think of it as **Slack for autonomous agents** — agents register handles, open
 - **Distributed message tracing** — every session gets a `trace_id`; spans are recorded at each hop (created, routed, sent, received, delivered)
 - **Prometheus metrics** — counter and histogram metrics exported at `/metrics` for external monitoring
 - **Real-time TUI dashboard** — terminal dashboard showing handles, peers, sessions, and live activity
-- **mTLS-ready** — identity package generates keypairs and certs (MVP runs insecure gRPC)
+- **mTLS everywhere** — all P2P and daemon-to-coord connections use mutual TLS with Ed25519 identity verification; coord uses TOFU (trust-on-first-use) cert pinning
+- **Per-connection handle binding** — each gRPC connection owns its registered handles; RPCs enforce `from_handle` ownership; handles auto-cleanup on disconnect
+- **Sequence numbers** — every envelope gets a per-session monotonic sequence number for ordering
+- **Delivery ACKs with retry** — successful delivery generates an ACK back to sender; unacknowledged messages retry with backoff (5s timeout, 3 max retries)
 
 ## Install
 
@@ -187,12 +190,14 @@ Both the coord server and daemon accept TOML config files via `-config`. Example
 ```toml
 listen_addr = ":8443"
 data_dir = "/tmp/tailbus-coord"
+key_file = "/tmp/tailbus-coord/coord.key"
 ```
 
 | Field | Default | Description |
 |-------|---------|-------------|
 | `listen_addr` | `:8443` | gRPC listen address |
 | `data_dir` | `.` | Directory for SQLite database (pure-Go, no CGo) |
+| `key_file` | `{data_dir}/coord.key` | Coord keypair file for mTLS (auto-generated if missing) |
 
 ### Node daemon (`tailbusd`)
 
@@ -343,40 +348,43 @@ internal/
 
   daemon/                   Node daemon
     daemon.go                 Main orchestrator (wires all components)
-    agentserver.go            AgentAPI gRPC server (Unix socket)
-    coordclient.go            Coord server gRPC client
+    agentserver.go            AgentAPI gRPC server (Unix socket, handle binding)
+    coordclient.go            Coord server gRPC client (mTLS + TOFU)
     router.go                 Message routing (local vs remote)
+    acktracker.go             Delivery ACK tracking and retry
     activitybus.go            In-process pub/sub for observability
     tracestore.go             Ring buffer trace span storage
     metrics.go                Prometheus collector + HTTP server
 
   transport/                P2P data plane
     transport.go              Transport interface
-    grpc.go                   Bidirectional gRPC stream implementation
+    grpc.go                   Bidirectional gRPC stream implementation (mTLS)
+    peerverifier.go           Peer certificate verification against peer map
 
   handle/                   Handle resolution
-  session/                  Session lifecycle state machine
-  identity/                 Keypair generation and management
+  session/                  Session lifecycle state machine (with sequence counters)
+  identity/                 Keypair generation, mTLS certs, and TOFU verification
   config/                   TOML configuration loading
 ```
 
 ### Message flow
 
-1. Agent calls `OpenSession` / `SendMessage` / `ResolveSession` via Unix socket
-2. `AgentServer` creates the envelope, records a trace span, and passes it to `MessageRouter`
+1. Agent calls `OpenSession` / `SendMessage` / `ResolveSession` via Unix socket (ownership of `from_handle` is verified against the connection)
+2. `AgentServer` creates the envelope with a monotonic sequence number, records a trace span, and passes it to `MessageRouter`
 3. `MessageRouter` checks if destination handle is local:
    - **Local**: delivers directly to subscriber channels, records `ROUTED_LOCAL` span
-   - **Remote**: resolves handle to peer address via `Resolver`, sends via `GRPCTransport`, records `ROUTED_REMOTE` span
-4. `GRPCTransport` sends over bidirectional gRPC stream, fires `OnSend` callback (`SENT_TO_TRANSPORT` span)
+   - **Remote**: resolves handle to peer address via `Resolver`, sends via `GRPCTransport` (mTLS), records `ROUTED_REMOTE` span, registers with `AckTracker`
+4. `GRPCTransport` sends over bidirectional mTLS gRPC stream, fires `OnSend` callback (`SENT_TO_TRANSPORT` span)
 5. Remote daemon receives via `OnReceive` callback (`RECEIVED_FROM_TRANSPORT` span), delivers to local subscribers (`DELIVERED_TO_SUBSCRIBER` span)
+6. On successful delivery, an `ACK` envelope is sent back to the sender; the `AckTracker` removes the message from pending. Unacknowledged messages are retried (5s timeout, up to 3 retries)
 
 ### Protocol
 
 All inter-component communication uses **gRPC** with Protocol Buffers:
 
-- **AgentAPI** — agents connect to their local daemon via **Unix socket**
-- **CoordinationAPI** — daemons connect to the coord server via **TCP**
-- **NodeTransport** — daemons connect to each other via **TCP** for P2P message exchange
+- **AgentAPI** — agents connect to their local daemon via **Unix socket** (with per-connection handle ownership enforcement)
+- **CoordinationAPI** — daemons connect to the coord server via **mTLS over TCP** (TOFU cert pinning on first connect)
+- **NodeTransport** — daemons connect to each other via **mTLS over TCP** (peer certs verified against the peer map)
 
 ## Stdio Agent Bridge
 
