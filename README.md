@@ -47,6 +47,7 @@ Think of it as **Slack for autonomous agents** — agents register handles, open
 - **Web chat UI** — browser-based chat interface embedded in the daemon binary via `go:embed`; select agents, send messages, view responses in real time at the MCP gateway address
 - **OAuth login flow** — device authorization grant (RFC 8628) for browser-based login; `tailbusd` starts → opens browser → login with Google → machine joins mesh; JWT access tokens (1h) with automatic refresh (30d); credentials persisted at `~/.tailbus/credentials.json`
 - **Coord admission control** — pre-auth token system (like `tailscale up --authkey`) gates which nodes can join the mesh; OAuth login works alongside pre-shared tokens; open mode (no tokens configured) preserves zero-config default
+- **Cloud deployment** — `tailbus-coord` runs on Fly.io at `coord.tailbus.co` with persistent volume for SQLite, edge TLS for OAuth (port 443), TCP passthrough for gRPC (port 8443), and Google OAuth; any machine can join with `tailbus login && tailbusd`
 - **Health & readiness endpoints** — `/healthz`, `/readyz`, and `/debug/pprof/*` on daemon metrics port (alongside `/metrics`), coord, and relay servers
 - **Docker Compose** — `docker compose up` for a full mesh with coord + 2 daemons + MCP gateway + example agents in 30 seconds
 
@@ -155,6 +156,32 @@ docker compose up --build
 Open http://localhost:8080, click **researcher**, and ask it to investigate any topic. The pipeline runs: researcher → critic → writer, with each step as a separate LLM call through a separate agent on the mesh.
 
 For cross-network deployment (mesh spanning multiple machines), see `examples/multi-machine/`.
+
+## Cloud Deployment (Fly.io)
+
+The public coord server runs on Fly.io at `coord.tailbus.co`. To join the mesh from any machine:
+
+```bash
+tailbus login     # authenticate with Google
+tailbusd          # start daemon, auto-joins the mesh
+```
+
+To deploy your own coord server to Fly.io:
+
+```bash
+fly apps create my-tailbus-coord
+fly volumes create coord_data --region fra --size 1
+fly secrets set OAUTH_CLIENT_ID=... OAUTH_CLIENT_SECRET=...
+fly deploy --build-target coord
+fly certs add coord.my-domain.com
+```
+
+The `fly.toml` and `deploy/coord.toml` in the repo are pre-configured:
+- OAuth HTTP on internal `:8080` → public port 443 via Fly edge TLS
+- gRPC on `:8443` → public port 8443 via TCP passthrough (coord handles mTLS)
+- Health check on `:8081`
+- Persistent volume at `/data` for SQLite + keys
+- OAuth client ID/secret read from env vars (`OAUTH_CLIENT_ID`, `OAUTH_CLIENT_SECRET`)
 
 ## Quick Start (from source)
 
@@ -293,6 +320,8 @@ key_file = "/tmp/tailbus-coord/coord.key"
 
 # OAuth configuration (enables browser-based login)
 oauth_http_addr = ":8080"
+# external_url = "https://coord.tailbus.co"  # set when behind edge TLS (e.g. Fly.io)
+# insecure_grpc = false  # disable gRPC TLS when edge TLS terminates it
 # jwt_secret = ""  # optional override, auto-generated if empty
 
 # [[oauth_providers]]
@@ -309,6 +338,8 @@ oauth_http_addr = ":8080"
 | `key_file` | `{data_dir}/coord.key` | Coord keypair file for mTLS (auto-generated if missing) |
 | `auth_tokens` | `[]` | Pre-auth tokens for admission control; if set, nodes must present one to register |
 | `oauth_http_addr` | `:8080` | HTTP listen address for OAuth endpoints (device flow + callback) |
+| `external_url` | (none) | Public base URL for OAuth callbacks (e.g. `https://coord.tailbus.co`); if unset, defaults to `http://localhost:{oauth_http_addr}` |
+| `insecure_grpc` | `false` | Disable gRPC server TLS (use when edge TLS terminates it, e.g. Fly.io HTTP handler) |
 | `jwt_secret` | (auto) | HMAC-SHA256 signing key for JWTs; auto-generated at `{data_dir}/jwt.key` if empty |
 | `oauth_providers` | `[]` | OIDC providers for browser login (see example above) |
 
@@ -371,6 +402,7 @@ mcp_addr = ":8080"
 | `mcp_addr` | (none) | MCP gateway HTTP listen address (empty string disables) |
 | `auth_token` | (none) | Pre-shared auth token for coord; if set, skips OAuth login entirely |
 | `credential_file` | `~/.tailbus/credentials.json` | Path to saved OAuth credentials |
+| `oauth_url` | (auto) | OAuth HTTP URL override; auto-detected from `coord_addr` (localhost → `http://localhost:8080`, remote → `https://{host}`) |
 
 All config fields can be overridden with command-line flags. Run any binary with `-help` to see available flags.
 

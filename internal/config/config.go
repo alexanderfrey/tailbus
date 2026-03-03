@@ -25,6 +25,8 @@ type CoordConfig struct {
 	OAuthProviders []OIDCProvider `toml:"oauth_providers"`
 	JWTSecret      string         `toml:"jwt_secret"`
 	OAuthHTTPAddr  string         `toml:"oauth_http_addr"`
+	ExternalURL    string         `toml:"external_url"`
+	InsecureGRPC   bool           `toml:"insecure_grpc"`
 }
 
 // DaemonConfig is the configuration for a node daemon.
@@ -40,6 +42,7 @@ type DaemonConfig struct {
 	AuthToken      string `toml:"auth_token"`
 	MCPAddr        string `toml:"mcp_addr"`
 	CredentialFile string `toml:"credential_file"`
+	OAuthURL       string `toml:"oauth_url"`
 }
 
 // RelayConfig is the configuration for a relay server.

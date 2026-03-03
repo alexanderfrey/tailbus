@@ -147,7 +147,7 @@ func (d *Daemon) resolveAuth(ctx context.Context) (string, error) {
 		credsPath = auth.DefaultCredentialFile()
 	}
 
-	coordURL := coordHTTPURL(d.cfg.CoordAddr)
+	coordURL := coordHTTPURL(d.cfg.CoordAddr, d.cfg.OAuthURL)
 
 	// 2. Saved credentials — try to load and refresh
 	creds, err := auth.LoadCredentials(credsPath)
@@ -201,9 +201,14 @@ func (d *Daemon) resolveAuth(ctx context.Context) (string, error) {
 	return tokenResp.AccessToken, nil
 }
 
-// coordHTTPURL derives the HTTP URL for the coord server from the gRPC address.
-// For now, assumes HTTP on port 8080 if the gRPC port is 8443, otherwise same host:8080.
-func coordHTTPURL(grpcAddr string) string {
+// coordHTTPURL derives the OAuth HTTP URL for the coord server.
+// If override is set, it is returned directly.
+// For localhost/127.0.0.1, defaults to http://{host}:8080 (local dev).
+// For remote hosts, defaults to https://{host} (assumes edge TLS on port 443).
+func coordHTTPURL(grpcAddr, override string) string {
+	if override != "" {
+		return override
+	}
 	host := grpcAddr
 	// Strip port if present
 	if i := len(host) - 1; i > 0 {
@@ -214,7 +219,12 @@ func coordHTTPURL(grpcAddr string) string {
 			host = host[:i]
 		}
 	}
-	return "http://" + host + ":8080"
+	// Local dev: use HTTP on port 8080
+	if host == "localhost" || host == "127.0.0.1" {
+		return "http://" + host + ":8080"
+	}
+	// Remote: assume HTTPS on port 443 (edge TLS)
+	return "https://" + host
 }
 
 // Run starts the daemon and blocks until the context is cancelled.
@@ -272,7 +282,7 @@ func (d *Daemon) Run(ctx context.Context) error {
 		if credsPath == "" {
 			credsPath = auth.DefaultCredentialFile()
 		}
-		coordURL := coordHTTPURL(d.cfg.CoordAddr)
+		coordURL := coordHTTPURL(d.cfg.CoordAddr, d.cfg.OAuthURL)
 		cc.SetTokenRefresh(func(ctx context.Context) (string, error) {
 			creds, err := auth.RefreshIfNeeded(ctx, credsPath, coordURL)
 			if err != nil {

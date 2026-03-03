@@ -64,6 +64,7 @@ func main() {
 	case "login":
 		loginFlags := flag.NewFlagSet("login", flag.ExitOnError)
 		coordAddr := loginFlags.String("coord", "coord.tailbus.co:8443", "coordination server address")
+		oauthURL := loginFlags.String("oauth-url", "", "OAuth HTTP URL override (default: auto-detect from coord)")
 		credsFile := loginFlags.String("credentials", "", "path to credentials file")
 		loginFlags.Parse(args[1:])
 
@@ -72,7 +73,15 @@ func main() {
 			credsPath = auth.DefaultCredentialFile()
 		}
 
-		coordURL := "http://" + stripPort(*coordAddr) + ":8080"
+		coordHost := stripPort(*coordAddr)
+		var coordURL string
+		if *oauthURL != "" {
+			coordURL = *oauthURL
+		} else if coordHost == "localhost" || coordHost == "127.0.0.1" {
+			coordURL = "http://" + coordHost + ":8080"
+		} else {
+			coordURL = "https://" + coordHost
+		}
 		ctx := context.Background()
 
 		// Check if already logged in

@@ -69,17 +69,23 @@ func main() {
 	}
 	defer store.Close()
 
-	// Load or generate coord keypair for mTLS
-	keyFile := cfg.KeyFile
-	if keyFile == "" {
-		keyFile = filepath.Join(cfg.DataDir, "coord.key")
+	// Load or generate coord keypair for mTLS (skip if behind edge TLS)
+	var kp *identity.Keypair
+	if !cfg.InsecureGRPC {
+		keyFile := cfg.KeyFile
+		if keyFile == "" {
+			keyFile = filepath.Join(cfg.DataDir, "coord.key")
+		}
+		var err error
+		kp, err = identity.LoadOrGenerate(keyFile)
+		if err != nil {
+			logger.Error("failed to load identity", "error", err)
+			os.Exit(1)
+		}
+		logger.Info("coord identity loaded", "key_file", keyFile)
+	} else {
+		logger.Info("gRPC TLS disabled (insecure_grpc=true, expecting edge TLS)")
 	}
-	kp, err := identity.LoadOrGenerate(keyFile)
-	if err != nil {
-		logger.Error("failed to load identity", "error", err)
-		os.Exit(1)
-	}
-	logger.Info("coord identity loaded", "key_file", keyFile)
 
 	srv, err := coord.NewServer(store, logger, kp)
 	if err != nil {
@@ -111,18 +117,30 @@ func main() {
 
 		// Set up OAuth device flow if providers are configured
 		if len(cfg.OAuthProviders) > 0 {
-			externalURL := "http://localhost" + cfg.OAuthHTTPAddr
-			if cfg.OAuthHTTPAddr == "" {
-				externalURL = "http://localhost:8080"
+			externalURL := cfg.ExternalURL
+			if externalURL == "" {
+				externalURL = "http://localhost" + cfg.OAuthHTTPAddr
+				if cfg.OAuthHTTPAddr == "" {
+					externalURL = "http://localhost:8080"
+				}
 			}
 
 			var providers []coord.OAuthProviderConfig
 			for _, p := range cfg.OAuthProviders {
+				clientID := p.ClientID
+				clientSecret := p.ClientSecret
+				// Allow env var overrides for secrets (e.g. fly secrets)
+				if v := os.Getenv("OAUTH_CLIENT_ID"); v != "" && clientID == "" {
+					clientID = v
+				}
+				if v := os.Getenv("OAUTH_CLIENT_SECRET"); v != "" && clientSecret == "" {
+					clientSecret = v
+				}
 				providers = append(providers, coord.OAuthProviderConfig{
 					Name:         p.Name,
 					Issuer:       p.Issuer,
-					ClientID:     p.ClientID,
-					ClientSecret: p.ClientSecret,
+					ClientID:     clientID,
+					ClientSecret: clientSecret,
 				})
 			}
 

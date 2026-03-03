@@ -24,6 +24,7 @@ func main() {
 	metricsAddr := flag.String("metrics", ":9090", "Prometheus metrics listen address (empty to disable)")
 	authToken := flag.String("auth-token", "", "auth token for coord admission control")
 	mcpAddr := flag.String("mcp", "", "MCP gateway listen address (e.g. :8080, empty to disable)")
+	oauthURL := flag.String("oauth-url", "", "OAuth HTTP URL override for coord (default: auto-detect)")
 	flag.Parse()
 
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelInfo}))
@@ -54,6 +55,9 @@ func main() {
 	}
 	if *mcpAddr != "" {
 		cfg.MCPAddr = *mcpAddr
+	}
+	if *oauthURL != "" {
+		cfg.OAuthURL = *oauthURL
 	}
 
 	if cfg.NodeID == "" {

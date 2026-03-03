@@ -16,9 +16,10 @@ RUN CGO_ENABLED=1 go build -o /bin/tailbus-coord ./cmd/tailbus-coord && \
 FROM alpine:3.21 AS coord
 RUN apk add --no-cache ca-certificates
 COPY --from=builder /bin/tailbus-coord /usr/local/bin/tailbus-coord
+COPY deploy/coord.toml /etc/tailbus/coord.toml
 RUN mkdir -p /data
 ENTRYPOINT ["tailbus-coord"]
-CMD ["-data-dir", "/data", "-listen", ":8443"]
+CMD ["-config", "/etc/tailbus/coord.toml", "-health-addr", ":8081"]
 
 # --- daemon image ---
 FROM alpine:3.21 AS daemon

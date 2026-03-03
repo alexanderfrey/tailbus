@@ -1,0 +1,10 @@
+listen_addr = ":8443"
+data_dir = "/data"
+external_url = "https://coord.tailbus.co"
+oauth_http_addr = ":8080"
+
+[[oauth_providers]]
+name = "google"
+issuer = "https://accounts.google.com"
+client_id = ""      # set via fly secrets: OAUTH_CLIENT_ID
+client_secret = ""  # set via fly secrets: OAUTH_CLIENT_SECRET

@@ -1,0 +1,34 @@
+app = "tailbus-coord"
+primary_region = "fra"
+
+[build]
+  dockerfile = "Dockerfile"
+  target = "coord"
+
+[mounts]
+  source = "coord_data"
+  destination = "/data"
+
+[[services]]
+  internal_port = 8080
+  protocol = "tcp"
+  [[services.ports]]
+    port = 443
+    handlers = ["tls", "http"]
+  [[services.ports]]
+    port = 80
+    handlers = ["http"]
+
+[[services]]
+  internal_port = 8443
+  protocol = "tcp"
+  [[services.ports]]
+    port = 8443
+
+[checks]
+  [checks.health]
+    port = 8081
+    type = "http"
+    path = "/healthz"
+    interval = "10s"
+    timeout = "2s"
