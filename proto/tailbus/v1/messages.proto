@@ -22,6 +22,8 @@ message Envelope {
   int64 sent_at_unix = 7;
   EnvelopeType type = 8;
   string trace_id = 9;
+  uint64 sequence = 10;
+  string ack_id = 11;
 }
 
 message CommandSpec {

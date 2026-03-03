@@ -286,6 +286,10 @@ func TestEndToEnd(t *testing.T) {
 	if msg.Envelope.SessionId != sessionID {
 		t.Errorf("session_id = %q, want %q", msg.Envelope.SessionId, sessionID)
 	}
+	// Verify sequence number
+	if msg.Envelope.Sequence != 1 {
+		t.Errorf("session_open sequence = %d, want 1", msg.Envelope.Sequence)
+	}
 	t.Log("Sales received session open")
 
 	// --- Sales replies ---
@@ -327,6 +331,10 @@ func TestEndToEnd(t *testing.T) {
 	}
 	if resolveMsg.Envelope.Type != messagepb.EnvelopeType_ENVELOPE_TYPE_SESSION_RESOLVE {
 		t.Errorf("expected SESSION_RESOLVE, got %v", resolveMsg.Envelope.Type)
+	}
+	// Sequence 2 was the resolve (marketing opened=1, resolved=2)
+	if resolveMsg.Envelope.Sequence != 2 {
+		t.Errorf("session_resolve sequence = %d, want 2", resolveMsg.Envelope.Sequence)
 	}
 	t.Log("Session resolved")
 

@@ -328,6 +328,7 @@ func (s *AgentServer) OpenSession(ctx context.Context, req *agentpb.OpenSessionR
 		traceID = uuid.New().String()
 	}
 	sess.TraceID = traceID
+	seq := sess.NextSequence()
 	s.sessions.Put(sess)
 
 	msgID := uuid.New().String()
@@ -341,6 +342,7 @@ func (s *AgentServer) OpenSession(ctx context.Context, req *agentpb.OpenSessionR
 		SentAtUnix:  sess.CreatedAt.Unix(),
 		Type:        messagepb.EnvelopeType_ENVELOPE_TYPE_SESSION_OPEN,
 		TraceId:     traceID,
+		Sequence:    seq,
 	}
 
 	if s.traceStore != nil {
@@ -383,6 +385,9 @@ func (s *AgentServer) SendMessage(ctx context.Context, req *agentpb.SendMessageR
 		toHandle = sess.FromHandle
 	}
 
+	seq := sess.NextSequence()
+	s.sessions.Put(sess)
+
 	msgID := uuid.New().String()
 	env := &messagepb.Envelope{
 		MessageId:   msgID,
@@ -394,6 +399,7 @@ func (s *AgentServer) SendMessage(ctx context.Context, req *agentpb.SendMessageR
 		SentAtUnix:  sess.UpdatedAt.Unix(),
 		Type:        messagepb.EnvelopeType_ENVELOPE_TYPE_MESSAGE,
 		TraceId:     sess.TraceID,
+		Sequence:    seq,
 	}
 
 	if s.traceStore != nil && sess.TraceID != "" {
@@ -469,6 +475,8 @@ func (s *AgentServer) ResolveSession(ctx context.Context, req *agentpb.ResolveSe
 		toHandle = sess.FromHandle
 	}
 
+	seq := sess.NextSequence()
+
 	msgID := uuid.New().String()
 	env := &messagepb.Envelope{
 		MessageId:   msgID,
@@ -480,6 +488,7 @@ func (s *AgentServer) ResolveSession(ctx context.Context, req *agentpb.ResolveSe
 		SentAtUnix:  sess.UpdatedAt.Unix(),
 		Type:        messagepb.EnvelopeType_ENVELOPE_TYPE_SESSION_RESOLVE,
 		TraceId:     sess.TraceID,
+		Sequence:    seq,
 	}
 
 	if s.traceStore != nil && sess.TraceID != "" {

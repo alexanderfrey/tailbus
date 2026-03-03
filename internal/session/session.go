@@ -25,6 +25,7 @@ type Session struct {
 	ToHandle   string
 	State      State
 	TraceID    string
+	NextSeq    uint64
 	CreatedAt  time.Time
 	UpdatedAt  time.Time
 }
@@ -37,6 +38,7 @@ func New(from, to string) *Session {
 		FromHandle: from,
 		ToHandle:   to,
 		State:      StateOpen,
+		NextSeq:    1,
 		CreatedAt:  now,
 		UpdatedAt:  now,
 	}
@@ -47,6 +49,13 @@ func New(from, to string) *Session {
 func (s *Session) Clone() *Session {
 	cp := *s
 	return &cp
+}
+
+// NextSequence returns the current sequence number and increments the counter.
+func (s *Session) NextSequence() uint64 {
+	seq := s.NextSeq
+	s.NextSeq++
+	return seq
 }
 
 // Resolve transitions the session to resolved state.

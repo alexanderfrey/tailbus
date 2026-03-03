@@ -19,6 +19,24 @@ func TestNewSession(t *testing.T) {
 	}
 }
 
+func TestSequenceMonotonic(t *testing.T) {
+	s := New("a", "b")
+	if s.NextSeq != 1 {
+		t.Errorf("initial NextSeq = %d, want 1", s.NextSeq)
+	}
+
+	seq1 := s.NextSequence()
+	seq2 := s.NextSequence()
+	seq3 := s.NextSequence()
+
+	if seq1 != 1 || seq2 != 2 || seq3 != 3 {
+		t.Errorf("sequences = %d, %d, %d; want 1, 2, 3", seq1, seq2, seq3)
+	}
+	if s.NextSeq != 4 {
+		t.Errorf("NextSeq after 3 calls = %d, want 4", s.NextSeq)
+	}
+}
+
 func TestResolve(t *testing.T) {
 	s := New("a", "b")
 	if err := s.Resolve(); err != nil {
