@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>tailbus — Verify Device</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #0f172a; color: #e2e8f0; min-height: 100vh; display: flex; align-items: center; justify-content: center; }
+  .card { background: #1e293b; border-radius: 12px; padding: 2.5rem; max-width: 400px; width: 90%; text-align: center; box-shadow: 0 4px 24px rgba(0,0,0,0.3); }
+  h1 { font-size: 1.5rem; margin-bottom: 0.5rem; color: #f1f5f9; }
+  .subtitle { color: #94a3b8; margin-bottom: 2rem; font-size: 0.9rem; }
+  .code-form { display: flex; flex-direction: column; gap: 1rem; }
+  input[type="text"] { font-size: 1.8rem; letter-spacing: 0.3em; text-align: center; text-transform: uppercase; padding: 0.75rem; border: 2px solid #334155; border-radius: 8px; background: #0f172a; color: #f1f5f9; outline: none; }
+  input[type="text"]:focus { border-color: #3b82f6; }
+  button { font-size: 1rem; padding: 0.75rem 1.5rem; border: none; border-radius: 8px; cursor: pointer; font-weight: 600; transition: background 0.2s; }
+  .btn-primary { background: #3b82f6; color: white; }
+  .btn-primary:hover { background: #2563eb; }
+  .btn-primary:disabled { background: #475569; cursor: not-allowed; }
+  .btn-google { background: white; color: #1f2937; display: inline-flex; align-items: center; gap: 0.5rem; justify-content: center; }
+  .btn-google:hover { background: #f1f5f9; }
+  .error { color: #f87171; font-size: 0.9rem; margin-top: 0.5rem; }
+  .success { color: #4ade80; }
+  .step2 { display: none; }
+  .logo { font-size: 2rem; margin-bottom: 1rem; }
+</style>
+</head>
+<body>
+<div class="card">
+  <div class="logo">&#x1f680;</div>
+  <h1>tailbus</h1>
+  <p class="subtitle">Enter the code shown in your terminal</p>
+
+  <div id="step1" class="code-form">
+    <input type="text" id="code" maxlength="8" placeholder="ABCD-EFGH" autocomplete="off" autofocus>
+    <button class="btn-primary" onclick="verifyCode()">Verify</button>
+    <div id="error1" class="error"></div>
+  </div>
+
+  <div id="step2" class="step2">
+    <p style="margin-bottom:1rem;">Code verified. Sign in to connect your device.</p>
+    <a id="google-link" href="#">
+      <button class="btn-google" style="width:100%;">
+        <svg width="18" height="18" viewBox="0 0 18 18"><path fill="#4285F4" d="M17.64 9.2c0-.637-.057-1.251-.164-1.84H9v3.481h4.844a4.14 4.14 0 0 1-1.796 2.716v2.259h2.908c1.702-1.567 2.684-3.875 2.684-6.615z"/><path fill="#34A853" d="M9 18c2.43 0 4.467-.806 5.956-2.184l-2.908-2.259c-.806.54-1.837.86-3.048.86-2.344 0-4.328-1.584-5.036-3.711H.957v2.332A8.997 8.997 0 0 0 9 18z"/><path fill="#FBBC05" d="M3.964 10.71A5.41 5.41 0 0 1 3.682 9c0-.593.102-1.17.282-1.71V4.958H.957A8.997 8.997 0 0 0 0 9c0 1.452.348 2.827.957 4.042l3.007-2.332z"/><path fill="#EA4335" d="M9 3.58c1.321 0 2.508.454 3.44 1.345l2.582-2.58C13.463.891 11.426 0 9 0A8.997 8.997 0 0 0 .957 4.958L3.964 7.29C4.672 5.163 6.656 3.58 9 3.58z"/></svg>
+        Sign in with Google
+      </button>
+    </a>
+  </div>
+
+  <div id="step3" class="step2">
+    <p class="success" style="font-size:1.2rem;margin-bottom:0.5rem;">&#x2714; Connected!</p>
+    <p>You can close this window and return to your terminal.</p>
+  </div>
+</div>
+
+<script>
+function verifyCode() {
+  const code = document.getElementById('code').value.replace(/[^a-zA-Z0-9]/g, '').toUpperCase();
+  if (code.length < 8) {
+    document.getElementById('error1').textContent = 'Please enter the full 8-character code.';
+    return;
+  }
+  fetch('/oauth/verify', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({user_code: code})
+  }).then(r => r.json()).then(data => {
+    if (data.error) {
+      document.getElementById('error1').textContent = data.error;
+      return;
+    }
+    document.getElementById('step1').style.display = 'none';
+    document.getElementById('step2').style.display = 'block';
+    document.getElementById('google-link').href = data.auth_url;
+  }).catch(() => {
+    document.getElementById('error1').textContent = 'Connection error. Please try again.';
+  });
+}
+
+// Allow enter key to submit
+document.getElementById('code').addEventListener('keydown', function(e) {
+  if (e.key === 'Enter') verifyCode();
+});
+
+// Auto-format with dash
+document.getElementById('code').addEventListener('input', function(e) {
+  let v = e.target.value.replace(/[^a-zA-Z0-9]/g, '').toUpperCase();
+  if (v.length > 4) v = v.slice(0,4) + '-' + v.slice(4,8);
+  e.target.value = v;
+});
+
+// Check if we're on the callback success page
+if (window.location.search.includes('success=true')) {
+  document.getElementById('step1').style.display = 'none';
+  document.getElementById('step3').style.display = 'block';
+}
+</script>
+</body>
+</html>

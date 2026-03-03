@@ -77,6 +77,23 @@ func (s *Store) migrate() error {
 		return fmt.Errorf("create auth_tokens table: %w", err)
 	}
 
+	_, err = s.db.Exec(`
+		CREATE TABLE IF NOT EXISTS users (
+			email TEXT PRIMARY KEY,
+			created_at INTEGER NOT NULL,
+			last_login INTEGER NOT NULL
+		);
+		CREATE TABLE IF NOT EXISTS node_users (
+			node_id TEXT NOT NULL,
+			email TEXT NOT NULL,
+			bound_at INTEGER NOT NULL,
+			PRIMARY KEY (node_id, email)
+		);
+	`)
+	if err != nil {
+		return fmt.Errorf("create users tables: %w", err)
+	}
+
 	return nil
 }
 
@@ -379,6 +396,53 @@ func (s *Store) HasAuthTokens() (bool, error) {
 func (s *Store) RevokeAuthToken(name string) error {
 	_, err := s.db.Exec("DELETE FROM auth_tokens WHERE name = ?", name)
 	return err
+}
+
+// UpsertUser creates or updates a user record, updating last_login.
+func (s *Store) UpsertUser(email string) error {
+	now := time.Now().Unix()
+	_, err := s.db.Exec(`
+		INSERT INTO users (email, created_at, last_login) VALUES (?, ?, ?)
+		ON CONFLICT(email) DO UPDATE SET last_login = excluded.last_login
+	`, email, now, now)
+	return err
+}
+
+// BindNodeToUser associates a node with a user.
+func (s *Store) BindNodeToUser(nodeID, email string) error {
+	_, err := s.db.Exec(`
+		INSERT INTO node_users (node_id, email, bound_at) VALUES (?, ?, ?)
+		ON CONFLICT(node_id, email) DO UPDATE SET bound_at = excluded.bound_at
+	`, nodeID, email, time.Now().Unix())
+	return err
+}
+
+// GetNodeUser returns the email of the user bound to a node, or "" if none.
+func (s *Store) GetNodeUser(nodeID string) (string, error) {
+	var email string
+	err := s.db.QueryRow("SELECT email FROM node_users WHERE node_id = ? LIMIT 1", nodeID).Scan(&email)
+	if err == sql.ErrNoRows {
+		return "", nil
+	}
+	return email, err
+}
+
+// ListUserNodes returns all node IDs bound to a user.
+func (s *Store) ListUserNodes(email string) ([]string, error) {
+	rows, err := s.db.Query("SELECT node_id FROM node_users WHERE email = ?", email)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var nodes []string
+	for rows.Next() {
+		var nodeID string
+		if err := rows.Scan(&nodeID); err != nil {
+			return nil, err
+		}
+		nodes = append(nodes, nodeID)
+	}
+	return nodes, nil
 }
 
 // Close closes the database.

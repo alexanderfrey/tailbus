@@ -8,26 +8,38 @@ import (
 	"github.com/BurntSushi/toml"
 )
 
+// OIDCProvider holds the configuration for an OpenID Connect provider.
+type OIDCProvider struct {
+	Name         string `toml:"name"`
+	Issuer       string `toml:"issuer"`
+	ClientID     string `toml:"client_id"`
+	ClientSecret string `toml:"client_secret"`
+}
+
 // CoordConfig is the configuration for the coordination server.
 type CoordConfig struct {
-	ListenAddr string   `toml:"listen_addr"`
-	DataDir    string   `toml:"data_dir"`
-	KeyFile    string   `toml:"key_file"`
-	AuthTokens []string `toml:"auth_tokens"`
+	ListenAddr     string         `toml:"listen_addr"`
+	DataDir        string         `toml:"data_dir"`
+	KeyFile        string         `toml:"key_file"`
+	AuthTokens     []string       `toml:"auth_tokens"`
+	OAuthProviders []OIDCProvider `toml:"oauth_providers"`
+	JWTSecret      string         `toml:"jwt_secret"`
+	OAuthHTTPAddr  string         `toml:"oauth_http_addr"`
 }
 
 // DaemonConfig is the configuration for a node daemon.
 type DaemonConfig struct {
-	NodeID        string `toml:"node_id"`
-	CoordAddr     string `toml:"coord_addr"`
-	AdvertiseAddr string `toml:"advertise_addr"`
-	ListenAddr    string `toml:"listen_addr"`
-	SocketPath    string `toml:"socket_path"`
-	KeyFile       string `toml:"key_file"`
-	DataDir       string `toml:"data_dir"`
-	MetricsAddr   string `toml:"metrics_addr"`
-	AuthToken     string `toml:"auth_token"`
-	MCPAddr       string `toml:"mcp_addr"`
+	NodeID         string `toml:"node_id"`
+	CoordAddr      string `toml:"coord_addr"`
+	AdvertiseAddr  string `toml:"advertise_addr"`
+	ListenAddr     string `toml:"listen_addr"`
+	SocketPath     string `toml:"socket_path"`
+	KeyFile        string `toml:"key_file"`
+	DataDir        string `toml:"data_dir"`
+	MetricsAddr    string `toml:"metrics_addr"`
+	AuthToken      string `toml:"auth_token"`
+	MCPAddr        string `toml:"mcp_addr"`
+	CredentialFile string `toml:"credential_file"`
 }
 
 // RelayConfig is the configuration for a relay server.

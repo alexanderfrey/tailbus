@@ -13,6 +13,7 @@ import (
 
 	agentpb "github.com/alexanderfrey/tailbus/api/agentpb"
 	messagepb "github.com/alexanderfrey/tailbus/api/messagepb"
+	"github.com/alexanderfrey/tailbus/internal/auth"
 	"github.com/alexanderfrey/tailbus/internal/config"
 	"github.com/alexanderfrey/tailbus/internal/handle"
 	"github.com/alexanderfrey/tailbus/internal/identity"
@@ -131,6 +132,91 @@ func New(cfg *config.DaemonConfig, logger *slog.Logger) (*Daemon, error) {
 	return d, nil
 }
 
+// resolveAuth determines the auth token to use for coord registration.
+// Priority: 1) explicit AuthToken in config, 2) saved credentials (refresh if needed),
+// 3) device authorization flow (interactive).
+func (d *Daemon) resolveAuth(ctx context.Context) (string, error) {
+	// 1. Explicit auth token — backward compat, skip OAuth entirely
+	if d.cfg.AuthToken != "" {
+		d.logger.Info("using pre-shared auth token")
+		return d.cfg.AuthToken, nil
+	}
+
+	credsPath := d.cfg.CredentialFile
+	if credsPath == "" {
+		credsPath = auth.DefaultCredentialFile()
+	}
+
+	coordURL := coordHTTPURL(d.cfg.CoordAddr)
+
+	// 2. Saved credentials — try to load and refresh
+	creds, err := auth.LoadCredentials(credsPath)
+	if err == nil {
+		if !creds.NeedsRefresh() {
+			d.logger.Info("using saved credentials", "email", creds.Email)
+			return creds.AccessToken, nil
+		}
+		// Try to refresh
+		refreshed, rerr := auth.RefreshIfNeeded(ctx, credsPath, coordURL)
+		if rerr == nil {
+			d.logger.Info("refreshed credentials", "email", refreshed.Email)
+			return refreshed.AccessToken, nil
+		}
+		d.logger.Warn("credential refresh failed, starting device flow", "error", rerr)
+	}
+
+	// 3. Device authorization flow (interactive)
+	d.logger.Info("no credentials found, starting login flow")
+
+	devResp, err := auth.RequestDeviceCode(ctx, coordURL)
+	if err != nil {
+		// If the coord doesn't have OAuth configured, the request will fail.
+		// In this case, try to register without a token (open mode).
+		d.logger.Info("device code request failed (coord may not have OAuth), proceeding without auth", "error", err)
+		return "", nil
+	}
+
+	// Print the verification URL and user code to stderr
+	fmt.Fprintf(os.Stderr, "\nTo authenticate, visit:\n  %s\n\nand enter code: %s\n\nWaiting for login...\n\n",
+		devResp.VerificationURI, devResp.UserCode)
+
+	tokenResp, err := auth.PollForToken(ctx, coordURL, devResp.DeviceCode, devResp.Interval)
+	if err != nil {
+		return "", fmt.Errorf("device flow failed: %w", err)
+	}
+
+	// Save credentials
+	newCreds := &auth.Credentials{
+		AccessToken:  tokenResp.AccessToken,
+		RefreshToken: tokenResp.RefreshToken,
+		Email:        tokenResp.Email,
+		CoordAddr:    d.cfg.CoordAddr,
+		ExpiresAt:    time.Now().Add(time.Duration(tokenResp.ExpiresIn) * time.Second).Unix(),
+	}
+	if err := auth.SaveCredentials(credsPath, newCreds); err != nil {
+		d.logger.Warn("failed to save credentials", "error", err)
+	}
+
+	fmt.Fprintf(os.Stderr, "Authenticated as %s\n\n", tokenResp.Email)
+	return tokenResp.AccessToken, nil
+}
+
+// coordHTTPURL derives the HTTP URL for the coord server from the gRPC address.
+// For now, assumes HTTP on port 8080 if the gRPC port is 8443, otherwise same host:8080.
+func coordHTTPURL(grpcAddr string) string {
+	host := grpcAddr
+	// Strip port if present
+	if i := len(host) - 1; i > 0 {
+		for i > 0 && host[i] != ':' {
+			i--
+		}
+		if i > 0 {
+			host = host[:i]
+		}
+	}
+	return "http://" + host + ":8080"
+}
+
 // Run starts the daemon and blocks until the context is cancelled.
 func (d *Daemon) Run(ctx context.Context) error {
 	// Bind transport to daemon context so streams close on shutdown
@@ -165,14 +251,36 @@ func (d *Daemon) Run(ctx context.Context) error {
 	// Wire dashboard dependencies
 	d.agentServer.SetDashboardDeps(d.cfg.NodeID, d.resolver, d.transport)
 
+	// Resolve authentication before connecting to coord
+	authToken, err := d.resolveAuth(ctx)
+	if err != nil {
+		return fmt.Errorf("resolve auth: %w", err)
+	}
+
 	// Connect to coord server with mTLS + TOFU
 	coordFPFile := filepath.Join(os.TempDir(), "tailbusd-"+d.cfg.NodeID+".coord-fp")
-	cc, err := NewCoordClient(d.cfg.CoordAddr, d.cfg.NodeID, d.keypair.Public, d.cfg.AdvertiseAddr, d.resolver, d.logger, d.keypair, coordFPFile, d.cfg.AuthToken)
+	cc, err := NewCoordClient(d.cfg.CoordAddr, d.cfg.NodeID, d.keypair.Public, d.cfg.AdvertiseAddr, d.resolver, d.logger, d.keypair, coordFPFile, authToken)
 	if err != nil {
 		return fmt.Errorf("create coord client: %w", err)
 	}
 	d.coordClient = cc
 	defer cc.Close()
+
+	// Set up token refresh callback for JWT-authenticated connections
+	if authToken != "" && d.cfg.AuthToken == "" {
+		credsPath := d.cfg.CredentialFile
+		if credsPath == "" {
+			credsPath = auth.DefaultCredentialFile()
+		}
+		coordURL := coordHTTPURL(d.cfg.CoordAddr)
+		cc.SetTokenRefresh(func(ctx context.Context) (string, error) {
+			creds, err := auth.RefreshIfNeeded(ctx, credsPath, coordURL)
+			if err != nil {
+				return "", err
+			}
+			return creds.AccessToken, nil
+		})
+	}
 
 	// Proactively connect to relays when relay info updates
 	cc.SetOnRelayUpdate(func() { d.transport.ConnectToRelays() })

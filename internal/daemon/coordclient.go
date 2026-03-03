@@ -27,7 +27,8 @@ type CoordClient struct {
 	isRelay       bool
 	logger        *slog.Logger
 	resolver      *handle.Resolver
-	onRelayUpdate func() // called after relay info is updated
+	onRelayUpdate func()                         // called after relay info is updated
+	tokenRefresh  func(ctx context.Context) (string, error) // refreshes auth token
 }
 
 // NewCoordClient creates a new coordination client.
@@ -77,6 +78,11 @@ func (c *CoordClient) SetIsRelay(isRelay bool) {
 // SetOnRelayUpdate sets a callback invoked after relay info is updated from the peer map.
 func (c *CoordClient) SetOnRelayUpdate(fn func()) {
 	c.onRelayUpdate = fn
+}
+
+// SetTokenRefresh sets a callback that refreshes the auth token when auth errors occur.
+func (c *CoordClient) SetTokenRefresh(fn func(ctx context.Context) (string, error)) {
+	c.tokenRefresh = fn
 }
 
 // Register registers this node with the coordination server.
@@ -193,6 +199,13 @@ func (c *CoordClient) Heartbeat(ctx context.Context, getHandles func() []string,
 			})
 			if err != nil {
 				c.logger.Error("heartbeat failed", "error", err)
+				// Try refreshing the token first
+				if c.tokenRefresh != nil {
+					if newToken, terr := c.tokenRefresh(ctx); terr == nil && newToken != "" {
+						c.authToken = newToken
+						c.logger.Info("auth token refreshed after heartbeat failure")
+					}
+				}
 				if reRegister != nil {
 					c.logger.Warn("heartbeat error, attempting re-registration")
 					if rerr := reRegister(ctx); rerr != nil {

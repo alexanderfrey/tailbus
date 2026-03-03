@@ -20,12 +20,12 @@ func TestAdmissionOpenMode(t *testing.T) {
 	defer cleanup()
 
 	// No tokens configured — should allow registration without a token
-	if err := adm.ValidateRegistration("", "node-1"); err != nil {
+	if _, err := adm.ValidateRegistration("", "node-1"); err != nil {
 		t.Fatalf("open mode should allow empty token: %v", err)
 	}
 
 	// Should also allow a random token in open mode (no validation needed)
-	if err := adm.ValidateRegistration("random-token", "node-1"); err != nil {
+	if _, err := adm.ValidateRegistration("random-token", "node-1"); err != nil {
 		t.Fatalf("open mode should allow any token: %v", err)
 	}
 }
@@ -40,7 +40,7 @@ func TestAdmissionRejectsWithoutToken(t *testing.T) {
 	}
 
 	// Empty token should be rejected
-	err := adm.ValidateRegistration("", "node-1")
+	_, err := adm.ValidateRegistration("", "node-1")
 	if err == nil {
 		t.Fatal("expected rejection with empty token in closed mode")
 	}
@@ -55,7 +55,7 @@ func TestAdmissionAcceptsValidToken(t *testing.T) {
 	}
 
 	// Correct token should be accepted
-	if err := adm.ValidateRegistration("secret123", "node-1"); err != nil {
+	if _, err := adm.ValidateRegistration("secret123", "node-1"); err != nil {
 		t.Fatalf("valid token should be accepted: %v", err)
 	}
 }
@@ -69,7 +69,7 @@ func TestAdmissionRejectsInvalidToken(t *testing.T) {
 	}
 
 	// Wrong token should be rejected
-	err := adm.ValidateRegistration("wrong-token", "node-1")
+	_, err := adm.ValidateRegistration("wrong-token", "node-1")
 	if err == nil {
 		t.Fatal("expected rejection with invalid token")
 	}
@@ -85,12 +85,12 @@ func TestAdmissionSingleUseConsumed(t *testing.T) {
 	}
 
 	// First use should succeed
-	if err := adm.ValidateRegistration("use-once", "node-1"); err != nil {
+	if _, err := adm.ValidateRegistration("use-once", "node-1"); err != nil {
 		t.Fatalf("first use of single-use token should succeed: %v", err)
 	}
 
 	// Second use should fail
-	err := adm.ValidateRegistration("use-once", "node-2")
+	_, err := adm.ValidateRegistration("use-once", "node-2")
 	if err == nil {
 		t.Fatal("expected rejection on second use of single-use token")
 	}
@@ -108,7 +108,7 @@ func TestAdmissionExpiredToken(t *testing.T) {
 	}
 
 	// Expired token should be rejected
-	err := adm.ValidateRegistration("expired-tok", "node-1")
+	_, err := adm.ValidateRegistration("expired-tok", "node-1")
 	if err == nil {
 		t.Fatal("expected rejection for expired token")
 	}
@@ -125,7 +125,7 @@ func TestAdmissionMultiUseToken(t *testing.T) {
 
 	// Should work multiple times
 	for i := range 3 {
-		if err := adm.ValidateRegistration("reusable", "node-"+string(rune('1'+i))); err != nil {
+		if _, err := adm.ValidateRegistration("reusable", "node-"+string(rune('1'+i))); err != nil {
 			t.Fatalf("multi-use token should work on use %d: %v", i+1, err)
 		}
 	}
@@ -154,5 +154,41 @@ func TestHashTokenDeterministic(t *testing.T) {
 	h3 := HashToken("different")
 	if h1 == h3 {
 		t.Fatal("different inputs should produce different hashes")
+	}
+}
+
+func TestAdmissionJWT(t *testing.T) {
+	store, cleanup := testStore(t)
+	defer cleanup()
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
+
+	issuer, err := NewJWTIssuer(t.TempDir(), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	adm := NewAdmission(store, logger)
+	adm.SetJWT(issuer)
+
+	access, _, err := issuer.Issue("alice@example.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := adm.ValidateRegistration(access, "node-jwt-1")
+	if err != nil {
+		t.Fatalf("JWT admission should succeed: %v", err)
+	}
+	if result.Email != "alice@example.com" {
+		t.Fatalf("expected email alice@example.com, got %q", result.Email)
+	}
+
+	// Verify user was created
+	email, err := store.GetNodeUser("node-jwt-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if email != "alice@example.com" {
+		t.Fatalf("expected node bound to alice@example.com, got %q", email)
 	}
 }

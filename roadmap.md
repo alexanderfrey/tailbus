@@ -2,7 +2,7 @@
 
 ## Where we are today
 
-Working MVP with real security, NAT traversal, persistence, and MCP integration: coord server + node daemons + P2P gRPC transport + relay server + CLI + TUI dashboard + Prometheus metrics + distributed tracing + stdio bridge + MCP gateway + Docker Compose. **Phase 1 hardening complete:** mTLS on all connections (P2P, relay, and coord), per-connection handle ownership on the Unix socket, Unix socket token auth, coord admission control (pre-auth tokens), per-session sequence numbers, and delivery ACKs with retry. **Phase 2 reliability:** message persistence via bbolt — sessions and pending messages survive daemon restarts. **Phase 3 NAT traversal:** DERP-style relay server enables message delivery across NAT boundaries. **Phase 4 SDKs:** Python SDK (async/sync, zero deps) wrapping the stdio bridge. **Phase 5 protocol bridges:** MCP gateway exposes handles as MCP tools — any MCP-compatible LLM can use tailbus agents. **Phase 9 observability:** Web chat UI embedded in daemon binary for browser-based agent interaction. **Phase 10 deployment:** Docker Compose with full mesh + web UI + LLM agents; multi-agent LLM collaboration example (researcher/critic/writer pipeline); cross-network deployment templates for multi-machine meshes.
+Working MVP with real security, NAT traversal, persistence, and MCP integration: coord server + node daemons + P2P gRPC transport + relay server + CLI + TUI dashboard + Prometheus metrics + distributed tracing + stdio bridge + MCP gateway + Docker Compose. **Phase 1 hardening complete:** mTLS on all connections (P2P, relay, and coord), per-connection handle ownership on the Unix socket, Unix socket token auth, coord admission control (pre-auth tokens + OAuth/JWT), per-session sequence numbers, and delivery ACKs with retry. **Phase 2 reliability:** message persistence via bbolt — sessions and pending messages survive daemon restarts. **Phase 3 NAT traversal:** DERP-style relay server enables message delivery across NAT boundaries. **Phase 4 SDKs:** Python SDK (async/sync, zero deps) wrapping the stdio bridge. **Phase 5 protocol bridges:** MCP gateway exposes handles as MCP tools — any MCP-compatible LLM can use tailbus agents. **Phase 9 observability:** Web chat UI embedded in daemon binary for browser-based agent interaction. **Phase 10 deployment:** Docker Compose with full mesh + web UI + LLM agents; multi-agent LLM collaboration example (researcher/critic/writer pipeline); cross-network deployment templates for multi-machine meshes. **OAuth login:** Device Authorization Grant (RFC 8628) for Tailscale-style `install → login → connected` UX; Google OIDC; JWT tokens with auto-refresh; `tailbus login/logout/status` CLI commands.
 
 **What works:**
 - Agents register handles, open sessions, exchange messages, resolve conversations
@@ -25,7 +25,7 @@ Working MVP with real security, NAT traversal, persistence, and MCP integration:
 - No ACLs — unrestricted any-to-any messaging; need handle-level and tag-based policies
 - Python SDK only; still no TypeScript/native Go SDKs
 - No federation — `name@domain` is parsed but routing is single-coord only
-- No OIDC/SSO identity — nodes authenticate with keypairs, not corporate IdPs
+- ~~No OIDC/SSO identity — nodes authenticate with keypairs, not corporate IdPs~~ ✓ OAuth login with Google OIDC; JWT tokens; device authorization flow
 
 ---
 
@@ -63,7 +63,20 @@ Working MVP with real security, NAT traversal, persistence, and MCP integration:
 - Closed mode: if any tokens exist, `RegisterNodeRequest.auth_token` must match one
 - `-auth-token` flag and `auth_tokens`/`auth_token` config fields on coord, daemon, and relay
 
-### P1.6 — Handle namespace policies
+### ~~P1.6 — OAuth login flow (OIDC/SSO identity)~~ ✓ DONE
+- Device Authorization Grant (RFC 8628) — standard flow for CLI tools (same as `gh`, `tailscale`, `aws sso`)
+- Google OIDC via `go-oidc/v3` + `golang.org/x/oauth2`; extensible to more providers
+- JWT tokens (HMAC-SHA256): access tokens (1h) + refresh tokens (30d); auto-generated signing key at `<data_dir>/jwt.key`
+- Coord serves OAuth HTTP endpoints: `POST /oauth/device/code`, `POST /oauth/device/token`, `GET /oauth/verify` (embedded HTML), `GET /oauth/callback`, `POST /oauth/refresh`
+- Daemon `resolveAuth()`: checks explicit auth token → saved credentials → interactive device flow; credentials saved to `~/.tailbus/credentials.json` (mode 0600)
+- Token refresh on heartbeat auth failures; daemon auto-reconnects without re-login
+- CLI commands: `tailbus login` (device flow), `tailbus logout` (remove creds), `tailbus status` (show identity + connection)
+- Admission controller accepts both JWTs (tokens starting with `eyJ`) and pre-shared tokens — fully backward compatible
+- SQLite `users` and `node_users` tables track user↔node bindings
+- Default coord address changed to `coord.tailbus.dev:8443` for zero-config UX
+- Pre-shared `auth_token` in config/flags skips OAuth entirely (CI, automation)
+
+### P1.7 — Handle namespace policies
 - **Problem:** handle names are first-come-first-served with no revocation or reservation
 - Coord-level handle reservations (config or API)
 - Namespacing by org/team prefix (e.g., `team-a/billing`)
@@ -398,7 +411,7 @@ Working MVP with real security, NAT traversal, persistence, and MCP integration:
 | **P7.1-P7.2 — ACLs** | Required for multi-team deployments. | Large |
 | **P8.1 — Domain isolation** | Required for multi-tenant SaaS. | Large |
 | **P6.1-P6.3 — Rich semantics** | Multi-party sessions, delegation, error envelopes. | Large |
-| **OIDC/SSO Identity** | Enterprise adoption requires "use your existing IdP." | Large |
+| ~~**OIDC/SSO Identity**~~ | ✓ Done. OAuth login with Google OIDC, JWT tokens, device flow. | ~~Large~~ |
 | **P8.2 — Federation** | Massive scope; get single-domain right first. | Very large |
 | ~~**P10.1 — Docker compose**~~ | ✓ Done. Multi-stage Dockerfile + compose with 3 example agents. | ~~Small~~ |
 | **P10.2-P10.4 — Systemd, K8s, Helm** | Important but not differentiating. | Medium |

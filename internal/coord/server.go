@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net"
+	"net/http"
 	"time"
 
 	pb "github.com/alexanderfrey/tailbus/api/coordpb"
@@ -24,6 +25,8 @@ type Server struct {
 	registry  *Registry
 	peerMap   *PeerMap
 	admission *Admission
+	jwtIssuer *JWTIssuer
+	oauth     *OAuthServer
 	logger    *slog.Logger
 	grpc      *grpc.Server
 }
@@ -75,6 +78,25 @@ func NewServer(store *Store, logger *slog.Logger, kp *identity.Keypair) (*Server
 // Admission returns the server's admission controller for token seeding.
 func (s *Server) Admission() *Admission {
 	return s.admission
+}
+
+// SetJWT configures JWT issuing/validation on the server and admission controller.
+func (s *Server) SetJWT(issuer *JWTIssuer) {
+	s.jwtIssuer = issuer
+	s.admission.SetJWT(issuer)
+}
+
+// SetOAuth configures the OAuth device flow server.
+func (s *Server) SetOAuth(oauth *OAuthServer) {
+	s.oauth = oauth
+}
+
+// HTTPHandler returns an http.Handler for the OAuth routes, or nil if OAuth is not configured.
+func (s *Server) HTTPHandler() http.Handler {
+	if s.oauth == nil {
+		return nil
+	}
+	return s.oauth.Handler()
 }
 
 // Serve starts the gRPC server on the given listener.
@@ -135,7 +157,8 @@ func synthesizeManifests(descriptions map[string]string) map[string]*messagepb.S
 // RegisterNode handles node registration.
 func (s *Server) RegisterNode(_ context.Context, req *pb.RegisterNodeRequest) (*pb.RegisterNodeResponse, error) {
 	// Admission control: check auth token before allowing registration
-	if err := s.admission.ValidateRegistration(req.AuthToken, req.NodeId); err != nil {
+	result, err := s.admission.ValidateRegistration(req.AuthToken, req.NodeId)
+	if err != nil {
 		return &pb.RegisterNodeResponse{Ok: false, Error: err.Error()}, nil
 	}
 
@@ -153,7 +176,12 @@ func (s *Server) RegisterNode(_ context.Context, req *pb.RegisterNodeRequest) (*
 		s.logger.Error("failed to broadcast peer map", "error", err)
 	}
 
-	return &pb.RegisterNodeResponse{Ok: true}, nil
+	resp := &pb.RegisterNodeResponse{Ok: true}
+	if result != nil && result.Email != "" {
+		resp.UserEmail = result.Email
+	}
+
+	return resp, nil
 }
 
 // WatchPeerMap streams peer map updates to a node.

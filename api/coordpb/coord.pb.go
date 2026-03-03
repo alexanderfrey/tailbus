@@ -125,11 +125,13 @@ func (x *RegisterNodeRequest) GetAuthToken() string {
 }
 
 type RegisterNodeResponse struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Ok            bool                   `protobuf:"varint,1,opt,name=ok,proto3" json:"ok,omitempty"`
-	Error         string                 `protobuf:"bytes,2,opt,name=error,proto3" json:"error,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state          protoimpl.MessageState `protogen:"open.v1"`
+	Ok             bool                   `protobuf:"varint,1,opt,name=ok,proto3" json:"ok,omitempty"`
+	Error          string                 `protobuf:"bytes,2,opt,name=error,proto3" json:"error,omitempty"`
+	UserEmail      string                 `protobuf:"bytes,3,opt,name=user_email,json=userEmail,proto3" json:"user_email,omitempty"`
+	TokenExpiresAt int64                  `protobuf:"varint,4,opt,name=token_expires_at,json=tokenExpiresAt,proto3" json:"token_expires_at,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
 }
 
 func (x *RegisterNodeResponse) Reset() {
@@ -174,6 +176,20 @@ func (x *RegisterNodeResponse) GetError() string {
 		return x.Error
 	}
 	return ""
+}
+
+func (x *RegisterNodeResponse) GetUserEmail() string {
+	if x != nil {
+		return x.UserEmail
+	}
+	return ""
+}
+
+func (x *RegisterNodeResponse) GetTokenExpiresAt() int64 {
+	if x != nil {
+		return x.TokenExpiresAt
+	}
+	return 0
 }
 
 type WatchPeerMapRequest struct {
@@ -666,10 +682,13 @@ const file_tailbus_v1_coord_proto_rawDesc = "" +
 	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\x1a_\n" +
 	"\x14HandleManifestsEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x121\n" +
-	"\x05value\x18\x02 \x01(\v2\x1b.tailbus.v1.ServiceManifestR\x05value:\x028\x01\"<\n" +
+	"\x05value\x18\x02 \x01(\v2\x1b.tailbus.v1.ServiceManifestR\x05value:\x028\x01\"\x85\x01\n" +
 	"\x14RegisterNodeResponse\x12\x0e\n" +
 	"\x02ok\x18\x01 \x01(\bR\x02ok\x12\x14\n" +
-	"\x05error\x18\x02 \x01(\tR\x05error\".\n" +
+	"\x05error\x18\x02 \x01(\tR\x05error\x12\x1d\n" +
+	"\n" +
+	"user_email\x18\x03 \x01(\tR\tuserEmail\x12(\n" +
+	"\x10token_expires_at\x18\x04 \x01(\x03R\x0etokenExpiresAt\".\n" +
 	"\x13WatchPeerMapRequest\x12\x17\n" +
 	"\anode_id\x18\x01 \x01(\tR\x06nodeId\"\x84\x01\n" +
 	"\rPeerMapUpdate\x12*\n" +

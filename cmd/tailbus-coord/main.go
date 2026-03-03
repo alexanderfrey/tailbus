@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net"
+	"net/http"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -98,6 +99,46 @@ func main() {
 		logger.Info("admission control enabled", "tokens", len(cfg.AuthTokens))
 	}
 
+	// Set up JWT issuer if OAuth providers are configured or JWT secret is set
+	if len(cfg.OAuthProviders) > 0 || cfg.JWTSecret != "" {
+		jwtIssuer, err := coord.NewJWTIssuer(cfg.DataDir, cfg.JWTSecret)
+		if err != nil {
+			logger.Error("failed to create JWT issuer", "error", err)
+			os.Exit(1)
+		}
+		srv.SetJWT(jwtIssuer)
+		logger.Info("JWT authentication enabled")
+
+		// Set up OAuth device flow if providers are configured
+		if len(cfg.OAuthProviders) > 0 {
+			externalURL := "http://localhost" + cfg.OAuthHTTPAddr
+			if cfg.OAuthHTTPAddr == "" {
+				externalURL = "http://localhost:8080"
+			}
+
+			var providers []coord.OAuthProviderConfig
+			for _, p := range cfg.OAuthProviders {
+				providers = append(providers, coord.OAuthProviderConfig{
+					Name:         p.Name,
+					Issuer:       p.Issuer,
+					ClientID:     p.ClientID,
+					ClientSecret: p.ClientSecret,
+				})
+			}
+
+			oauthSrv, err := coord.NewOAuthServer(&coord.OAuthConfig{
+				Providers:   providers,
+				ExternalURL: externalURL,
+			}, jwtIssuer, logger)
+			if err != nil {
+				logger.Error("failed to create OAuth server", "error", err)
+				os.Exit(1)
+			}
+			srv.SetOAuth(oauthSrv)
+			logger.Info("OAuth device flow enabled", "providers", len(providers))
+		}
+	}
+
 	// Start stale-node reaper (90s TTL, 30s sweep)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -112,6 +153,25 @@ func main() {
 	// Start health server
 	if *healthAddr != "" {
 		go health.Serve(ctx, *healthAddr, func() bool { return true }, logger)
+	}
+
+	// Start OAuth HTTP server if configured
+	if handler := srv.HTTPHandler(); handler != nil {
+		oauthAddr := cfg.OAuthHTTPAddr
+		if oauthAddr == "" {
+			oauthAddr = ":8080"
+		}
+		httpSrv := &http.Server{Addr: oauthAddr, Handler: handler}
+		go func() {
+			logger.Info("OAuth HTTP server listening", "addr", oauthAddr)
+			if err := httpSrv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+				logger.Error("OAuth HTTP server error", "error", err)
+			}
+		}()
+		go func() {
+			<-ctx.Done()
+			httpSrv.Close()
+		}()
 	}
 
 	sigCh := make(chan os.Signal, 1)

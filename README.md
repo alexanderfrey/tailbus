@@ -45,7 +45,8 @@ Think of it as **Slack for autonomous agents** — agents register handles, open
 - **Message persistence** — bbolt-backed store on each daemon; sessions and pending messages survive daemon restarts; ACKed messages purged automatically
 - **MCP gateway** — HTTP server on daemon exposing handles as MCP tools; any MCP-compatible LLM (Claude, ChatGPT, Cursor) can discover and invoke tailbus agents with zero SDK code
 - **Web chat UI** — browser-based chat interface embedded in the daemon binary via `go:embed`; select agents, send messages, view responses in real time at the MCP gateway address
-- **Coord admission control** — pre-auth token system (like `tailscale up --authkey`) gates which nodes can join the mesh; open mode (no tokens configured) preserves zero-config default
+- **OAuth login flow** — device authorization grant (RFC 8628) for browser-based login; `tailbusd` starts → opens browser → login with Google → machine joins mesh; JWT access tokens (1h) with automatic refresh (30d); credentials persisted at `~/.tailbus/credentials.json`
+- **Coord admission control** — pre-auth token system (like `tailscale up --authkey`) gates which nodes can join the mesh; OAuth login works alongside pre-shared tokens; open mode (no tokens configured) preserves zero-config default
 - **Health & readiness endpoints** — `/healthz`, `/readyz`, and `/debug/pprof/*` on daemon metrics port (alongside `/metrics`), coord, and relay servers
 - **Docker Compose** — `docker compose up` for a full mesh with coord + 2 daemons + MCP gateway + example agents in 30 seconds
 
@@ -58,6 +59,20 @@ curl -sSL https://raw.githubusercontent.com/alexanderfrey/tailbus/main/install.s
 ```
 
 This detects your OS/architecture, downloads the latest release, and installs all three binaries to `/usr/local/bin` (or `~/.local/bin` if no sudo).
+
+Then start the daemon — it handles login automatically:
+
+```bash
+tailbusd          # opens browser → login with Google → machine joins mesh
+```
+
+Or authenticate separately:
+
+```bash
+tailbus login     # authenticate without starting daemon
+tailbus status    # check connection status
+tailbus logout    # remove saved credentials
+```
 
 ## Prerequisites (building from source)
 
@@ -275,6 +290,16 @@ listen_addr = ":8443"
 data_dir = "/tmp/tailbus-coord"
 key_file = "/tmp/tailbus-coord/coord.key"
 # auth_tokens = ["changeme"]
+
+# OAuth configuration (enables browser-based login)
+oauth_http_addr = ":8080"
+# jwt_secret = ""  # optional override, auto-generated if empty
+
+# [[oauth_providers]]
+# name = "google"
+# issuer = "https://accounts.google.com"
+# client_id = "YOUR_CLIENT_ID.apps.googleusercontent.com"
+# client_secret = "YOUR_CLIENT_SECRET"
 ```
 
 | Field | Default | Description |
@@ -283,6 +308,9 @@ key_file = "/tmp/tailbus-coord/coord.key"
 | `data_dir` | `.` | Directory for SQLite database (pure-Go, no CGo) |
 | `key_file` | `{data_dir}/coord.key` | Coord keypair file for mTLS (auto-generated if missing) |
 | `auth_tokens` | `[]` | Pre-auth tokens for admission control; if set, nodes must present one to register |
+| `oauth_http_addr` | `:8080` | HTTP listen address for OAuth endpoints (device flow + callback) |
+| `jwt_secret` | (auto) | HMAC-SHA256 signing key for JWTs; auto-generated at `{data_dir}/jwt.key` if empty |
+| `oauth_providers` | `[]` | OIDC providers for browser login (see example above) |
 
 **Flags:**
 
@@ -320,27 +348,29 @@ key_file = "/tmp/tailbus-relay.key"
 
 ```toml
 node_id = "node-1"
-coord_addr = "127.0.0.1:8443"
+coord_addr = "coord.tailbus.dev:8443"
 advertise_addr = "127.0.0.1:9443"
 listen_addr = ":9443"
 socket_path = "/tmp/tailbusd-1.sock"
 key_file = "/tmp/tailbusd-node1.key"
 metrics_addr = ":9090"
 mcp_addr = ":8080"
-# auth_token = "changeme"
+# auth_token = "changeme"        # skip OAuth, use pre-shared token
+# credential_file = "~/.tailbus/credentials.json"
 ```
 
 | Field | Default | Description |
 |-------|---------|-------------|
 | `node_id` | hostname | Unique identifier for this node |
-| `coord_addr` | `127.0.0.1:8443` | Coordination server address |
+| `coord_addr` | `coord.tailbus.dev:8443` | Coordination server address |
 | `advertise_addr` | (required) | Address other daemons use to reach this node |
 | `listen_addr` | `:9443` | P2P gRPC listen address |
 | `socket_path` | `/tmp/tailbusd.sock` | Unix socket for local agent connections |
 | `key_file` | `/tmp/tailbusd-{nodeID}.key` | Node keypair file (auto-generated if missing) |
 | `metrics_addr` | `:9090` | Prometheus + health/pprof HTTP endpoint (empty string disables) |
 | `mcp_addr` | (none) | MCP gateway HTTP listen address (empty string disables) |
-| `auth_token` | (none) | Auth token for coord admission control |
+| `auth_token` | (none) | Pre-shared auth token for coord; if set, skips OAuth login entirely |
+| `credential_file` | `~/.tailbus/credentials.json` | Path to saved OAuth credentials |
 
 All config fields can be overridden with command-line flags. Run any binary with `-help` to see available flags.
 
@@ -356,7 +386,15 @@ tailbus [flags] <command> [args]
 |------|---------|-------------|
 | `-socket` | `/tmp/tailbusd.sock` | Path to local daemon Unix socket |
 
-**Commands:**
+**Auth commands** (no daemon connection needed):
+
+| Command | Usage | Description |
+|---------|-------|-------------|
+| `login` | `login [--coord addr]` | Run device auth flow, save credentials, print email |
+| `logout` | `logout` | Remove saved credentials |
+| `status` | `status` | Show login status, email, token expiry, daemon connection |
+
+**Mesh commands** (requires running daemon):
 
 | Command | Usage | Description |
 |---------|-------|-------------|
@@ -500,9 +538,18 @@ proto/tailbus/v1/           Protocol buffer definitions
 internal/
   coord/                    Coordination server
     server.go                 gRPC server implementation
-    store.go                  SQLite-backed persistence
+    store.go                  SQLite-backed persistence (nodes, handles, auth_tokens, users)
     registry.go               Node registration
     peermap.go                Peer map distribution
+    jwt.go                    JWT issuing and validation (HMAC-SHA256)
+    oauth.go                  RFC 8628 device authorization flow + OIDC
+    admission.go              Node admission (pre-shared tokens + JWT)
+    oauth_web/verify.html     Embedded verification page (go:embed)
+
+  auth/                     Client-side authentication
+    credentials.go            Persistent credential storage (~/.tailbus/credentials.json)
+    device_flow.go            Device authorization client (RFC 8628)
+    refresh.go                Token refresh logic
 
   daemon/                   Node daemon
     daemon.go                 Main orchestrator (wires all components)

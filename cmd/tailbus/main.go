@@ -7,9 +7,11 @@ import (
 	"log/slog"
 	"os"
 	"strings"
+	"time"
 
 	agentpb "github.com/alexanderfrey/tailbus/api/agentpb"
 	messagepb "github.com/alexanderfrey/tailbus/api/messagepb"
+	"github.com/alexanderfrey/tailbus/internal/auth"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 )
@@ -30,6 +32,15 @@ func short(id string) string {
 	return id
 }
 
+func stripPort(addr string) string {
+	for i := len(addr) - 1; i > 0; i-- {
+		if addr[i] == ':' {
+			return addr[:i]
+		}
+	}
+	return addr
+}
+
 func main() {
 	socketPath := flag.String("socket", "/tmp/tailbusd.sock", "daemon Unix socket path")
 	flag.Parse()
@@ -39,10 +50,138 @@ func main() {
 	args := flag.Args()
 	if len(args) == 0 {
 		fmt.Println("Usage: tailbus [command] [args...]")
-		fmt.Println("Commands: register, introspect, list, open, send, subscribe, resolve, sessions, dashboard, trace, agent")
+		fmt.Println("\nAuth commands:")
+		fmt.Println("  login     Authenticate with the coordination server")
+		fmt.Println("  logout    Remove saved credentials")
+		fmt.Println("  status    Show login and connection status")
+		fmt.Println("\nMesh commands:")
+		fmt.Println("  register, introspect, list, open, send, subscribe, resolve, sessions, dashboard, trace, agent")
 		os.Exit(1)
 	}
 
+	// Handle auth commands before connecting to daemon
+	switch args[0] {
+	case "login":
+		loginFlags := flag.NewFlagSet("login", flag.ExitOnError)
+		coordAddr := loginFlags.String("coord", "coord.tailbus.dev:8443", "coordination server address")
+		credsFile := loginFlags.String("credentials", "", "path to credentials file")
+		loginFlags.Parse(args[1:])
+
+		credsPath := *credsFile
+		if credsPath == "" {
+			credsPath = auth.DefaultCredentialFile()
+		}
+
+		coordURL := "http://" + stripPort(*coordAddr) + ":8080"
+		ctx := context.Background()
+
+		// Check if already logged in
+		if creds, err := auth.LoadCredentials(credsPath); err == nil && !creds.IsExpired() {
+			fmt.Printf("Already logged in as %s\n", creds.Email)
+			fmt.Printf("Credentials: %s\n", credsPath)
+			os.Exit(0)
+		}
+
+		devResp, err := auth.RequestDeviceCode(ctx, coordURL)
+		if err != nil {
+			logger.Error("failed to start device flow", "error", err)
+			fmt.Fprintf(os.Stderr, "Could not connect to coord OAuth server at %s\n", coordURL)
+			os.Exit(1)
+		}
+
+		fmt.Printf("\nTo authenticate, visit:\n  %s\n\nand enter code: %s\n\nWaiting for login...\n",
+			devResp.VerificationURI, devResp.UserCode)
+
+		tokenResp, err := auth.PollForToken(ctx, coordURL, devResp.DeviceCode, devResp.Interval)
+		if err != nil {
+			logger.Error("login failed", "error", err)
+			os.Exit(1)
+		}
+
+		newCreds := &auth.Credentials{
+			AccessToken:  tokenResp.AccessToken,
+			RefreshToken: tokenResp.RefreshToken,
+			Email:        tokenResp.Email,
+			CoordAddr:    *coordAddr,
+			ExpiresAt:    time.Now().Add(time.Duration(tokenResp.ExpiresIn) * time.Second).Unix(),
+		}
+		if err := auth.SaveCredentials(credsPath, newCreds); err != nil {
+			logger.Error("failed to save credentials", "error", err)
+			os.Exit(1)
+		}
+
+		fmt.Printf("\nLogged in as %s\n", tokenResp.Email)
+		fmt.Printf("Credentials saved to %s\n", credsPath)
+		os.Exit(0)
+
+	case "logout":
+		logoutFlags := flag.NewFlagSet("logout", flag.ExitOnError)
+		credsFile := logoutFlags.String("credentials", "", "path to credentials file")
+		logoutFlags.Parse(args[1:])
+
+		credsPath := *credsFile
+		if credsPath == "" {
+			credsPath = auth.DefaultCredentialFile()
+		}
+
+		if err := auth.RemoveCredentials(credsPath); err != nil {
+			logger.Error("failed to remove credentials", "error", err)
+			os.Exit(1)
+		}
+		fmt.Println("Logged out. Credentials removed.")
+		os.Exit(0)
+
+	case "status":
+		statusFlags := flag.NewFlagSet("status", flag.ExitOnError)
+		credsFile := statusFlags.String("credentials", "", "path to credentials file")
+		statusFlags.Parse(args[1:])
+
+		credsPath := *credsFile
+		if credsPath == "" {
+			credsPath = auth.DefaultCredentialFile()
+		}
+
+		creds, err := auth.LoadCredentials(credsPath)
+		if err != nil {
+			fmt.Println("Not logged in.")
+			fmt.Printf("  Credential file: %s (not found)\n", credsPath)
+			// Still try to check daemon
+		} else {
+			fmt.Printf("Logged in as: %s\n", creds.Email)
+			fmt.Printf("  Coord: %s\n", creds.CoordAddr)
+			expiry := time.Unix(creds.ExpiresAt, 0)
+			if creds.IsExpired() {
+				fmt.Printf("  Token: expired at %s (will auto-refresh)\n", expiry.Format(time.RFC3339))
+			} else {
+				fmt.Printf("  Token: valid until %s\n", expiry.Format(time.RFC3339))
+			}
+			fmt.Printf("  Credentials: %s\n", credsPath)
+		}
+
+		// Check daemon connection
+		dialOpts := []grpc.DialOption{grpc.WithTransportCredentials(insecure.NewCredentials())}
+		if tokenData, err := os.ReadFile(*socketPath + ".token"); err == nil {
+			dialOpts = append(dialOpts, grpc.WithPerRPCCredentials(tokenCreds{token: string(tokenData)}))
+		}
+		conn, cerr := grpc.NewClient("unix://"+*socketPath, dialOpts...)
+		if cerr != nil {
+			fmt.Println("  Daemon: not running")
+		} else {
+			defer conn.Close()
+			client := agentpb.NewAgentAPIClient(conn)
+			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			defer cancel()
+			resp, err := client.ListHandles(ctx, &agentpb.ListHandlesRequest{})
+			if err != nil {
+				fmt.Println("  Daemon: not reachable")
+			} else {
+				fmt.Printf("  Daemon: running (%d handles)\n", len(resp.Entries))
+			}
+		}
+		os.Exit(0)
+	}
+
+	// All other commands require a daemon connection
 	dialOpts := []grpc.DialOption{grpc.WithTransportCredentials(insecure.NewCredentials())}
 	if tokenData, err := os.ReadFile(*socketPath + ".token"); err == nil {
 		dialOpts = append(dialOpts, grpc.WithPerRPCCredentials(tokenCreds{token: string(tokenData)}))

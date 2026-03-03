@@ -5,19 +5,31 @@ import (
 	"encoding/hex"
 	"fmt"
 	"log/slog"
+	"strings"
 )
+
+// AdmissionResult holds information from a successful admission check.
+type AdmissionResult struct {
+	Email string // non-empty if authenticated via JWT
+}
 
 // Admission controls which nodes are allowed to register with the coord server.
 // In open mode (no tokens configured), all registrations are allowed.
-// In closed mode (any tokens exist), a valid auth token is required.
+// In closed mode (any tokens exist), a valid auth token or JWT is required.
 type Admission struct {
 	store  *Store
+	jwt    *JWTIssuer
 	logger *slog.Logger
 }
 
 // NewAdmission creates a new admission controller.
 func NewAdmission(store *Store, logger *slog.Logger) *Admission {
 	return &Admission{store: store, logger: logger}
+}
+
+// SetJWT configures JWT validation for the admission controller.
+func (a *Admission) SetJWT(issuer *JWTIssuer) {
+	a.jwt = issuer
 }
 
 // HashToken returns the SHA-256 hex digest of a raw token string.
@@ -41,29 +53,53 @@ func (a *Admission) SeedToken(name, raw string, singleUse bool) error {
 }
 
 // ValidateRegistration checks whether a registration should be allowed.
-// Open mode: if no tokens exist in the DB, all registrations pass.
-// Closed mode: the provided authToken must match a valid, unexpired, unconsumed token.
-func (a *Admission) ValidateRegistration(authToken, nodeID string) error {
-	hasTokens, err := a.store.HasAuthTokens()
-	if err != nil {
-		return fmt.Errorf("check auth tokens: %w", err)
+// JWT path: if token starts with "eyJ", validate as JWT, extract email, bind node to user.
+// Pre-shared token path: hash and check against the auth_tokens table.
+// Open mode: if no tokens exist in the DB and no JWT issuer configured, allow everyone.
+func (a *Admission) ValidateRegistration(authToken, nodeID string) (*AdmissionResult, error) {
+	// JWT path: tokens starting with "eyJ" are JWTs
+	if a.jwt != nil && strings.HasPrefix(authToken, "eyJ") {
+		claims, err := a.jwt.Validate(authToken)
+		if err != nil {
+			return nil, fmt.Errorf("JWT validation failed: %w", err)
+		}
+		if claims.TokenType != "access" {
+			return nil, fmt.Errorf("expected access token, got %s", claims.TokenType)
+		}
+
+		// Upsert user + bind node
+		if err := a.store.UpsertUser(claims.Email); err != nil {
+			a.logger.Error("failed to upsert user", "email", claims.Email, "error", err)
+		}
+		if err := a.store.BindNodeToUser(nodeID, claims.Email); err != nil {
+			a.logger.Error("failed to bind node to user", "node_id", nodeID, "email", claims.Email, "error", err)
+		}
+
+		a.logger.Info("node admitted via JWT", "node_id", nodeID, "email", claims.Email)
+		return &AdmissionResult{Email: claims.Email}, nil
 	}
 
-	// Open mode — no tokens configured, allow everyone
-	if !hasTokens {
-		return nil
+	// Pre-shared token path
+	hasTokens, err := a.store.HasAuthTokens()
+	if err != nil {
+		return nil, fmt.Errorf("check auth tokens: %w", err)
+	}
+
+	// Open mode — no tokens configured and no OAuth, allow everyone
+	if !hasTokens && a.jwt == nil {
+		return &AdmissionResult{}, nil
 	}
 
 	// Closed mode — token required
 	if authToken == "" {
-		return fmt.Errorf("auth token required (coord has admission tokens configured)")
+		return nil, fmt.Errorf("auth token required (coord has admission tokens or OAuth configured)")
 	}
 
 	hash := HashToken(authToken)
 	if err := a.store.ValidateAndConsumeToken(hash, nodeID); err != nil {
-		return fmt.Errorf("auth token rejected: %w", err)
+		return nil, fmt.Errorf("auth token rejected: %w", err)
 	}
 
 	a.logger.Info("node admitted via auth token", "node_id", nodeID)
-	return nil
+	return &AdmissionResult{}, nil
 }

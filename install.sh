@@ -67,11 +67,11 @@ for bin in tailbus-coord tailbusd tailbus; do
   fi
 done
 
+# Create ~/.tailbus directory for credentials
+mkdir -p "${HOME}/.tailbus" 2>/dev/null || true
+
 echo ""
 echo "tailbus ${VERSION} installed successfully!"
-echo "  tailbus-coord  - coordination server"
-echo "  tailbusd        - node daemon"
-echo "  tailbus         - CLI tool"
 echo ""
 
 # Check if install dir is in PATH
@@ -81,3 +81,9 @@ case ":$PATH:" in
      echo "  export PATH=\"${INSTALL_DIR}:\$PATH\""
      echo "" ;;
 esac
+
+echo "Get started:"
+echo "  tailbusd               # start daemon -> login with Google -> connected"
+echo "  tailbus login          # authenticate without starting daemon"
+echo "  tailbus status         # check connection status"
+echo ""
