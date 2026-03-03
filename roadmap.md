@@ -2,7 +2,7 @@
 
 ## Where we are today
 
-Working MVP with real security and NAT traversal: coord server + node daemons + P2P gRPC transport + relay server + CLI + TUI dashboard + Prometheus metrics + distributed tracing + stdio bridge. **Phase 1 hardening complete:** mTLS on all connections (P2P, relay, and coord), per-connection handle ownership on the Unix socket, Unix socket token auth, per-session sequence numbers, and delivery ACKs with retry. **Phase 3 NAT traversal started:** DERP-style relay server enables message delivery across NAT boundaries. **Operability:** health/readiness endpoints and pprof on all binaries.
+Working MVP with real security and NAT traversal: coord server + node daemons + P2P gRPC transport + relay server + CLI + TUI dashboard + Prometheus metrics + distributed tracing + stdio bridge. **Phase 1 hardening complete:** mTLS on all connections (P2P, relay, and coord), per-connection handle ownership on the Unix socket, Unix socket token auth, per-session sequence numbers, and delivery ACKs with retry. **Phase 3 NAT traversal started:** DERP-style relay server enables message delivery across NAT boundaries. **Operability:** health/readiness endpoints and pprof on all binaries. **Phase 4 SDKs started:** Python SDK (async/sync, zero deps) wrapping the stdio bridge.
 
 **What works:**
 - Agents register handles, open sessions, exchange messages, resolve conversations
@@ -13,11 +13,12 @@ Working MVP with real security and NAT traversal: coord server + node daemons + 
 - Unix socket token auth — daemon generates a random token file (mode 0600); CLI and agents present it automatically
 - Every envelope carries a monotonic sequence number; delivered messages generate ACKs; unacked messages retry (5s timeout, 3 retries)
 - `/healthz`, `/readyz`, and `/debug/pprof/*` endpoints on daemon metrics port, coord, and relay
+- Python SDK (`sdk/python/`) — `AsyncAgent` and `SyncAgent` with zero external dependencies
 - Service manifests, @-mention routing, tracing, Prometheus metrics, TUI dashboard
 
 **What's missing for real adoption:**
 - No persistence — daemon restart loses all sessions and pending messages
-- No SDKs beyond Go — agents must use the JSON-lines subprocess bridge
+- Python SDK ships (Phase 1 subprocess bridge); still no TypeScript/native Go SDKs
 - No federation — `name@domain` is parsed but routing is single-coord only
 
 ---
@@ -129,12 +130,15 @@ Working MVP with real security and NAT traversal: coord server + node daemons + 
 
 *If it's not easy to integrate from Python/TS, it won't get adopted. 90% of AI agents are Python.*
 
-### P4.1 — Python SDK ← **HIGH PRIORITY**
-- `pip install tailbus`
-- Phase 1: wrap the stdio JSON-lines bridge (zero native deps, works today)
-- Phase 2: native gRPC client using generated protobuf stubs (better perf, no subprocess)
-- Async/await API: `agent.register("my-handle")`, `async for msg in agent.subscribe()`
-- Auto-starts `tailbus agent` subprocess in phase 1, manages lifecycle
+### ~~P4.1 — Python SDK (Phase 1: subprocess bridge)~~ ✓ DONE
+- `sdk/python/` — zero-dependency async/sync Python SDK wrapping the stdio JSON-lines bridge
+- `AsyncAgent` (async/await) and `SyncAgent` (threading wrapper) with context manager support
+- Full protocol coverage: register (with manifests), open/send/resolve sessions, introspect, list handles/sessions
+- `@agent.on_message` decorator for incoming messages, `run_forever()` for long-running agents
+- FIFO future correlation for request/response; interleaved `Message` events routed to handler
+- Exception hierarchy: `BridgeError`, `BridgeDiedError`, `NotRegisteredError`, `AlreadyRegisteredError`
+- 46 tests (protocol serialization, async agent with mocked subprocess, sync wrapper)
+- Phase 2 (future): native gRPC client using generated protobuf stubs for better performance
 
 ### P4.2 — TypeScript/Node SDK
 - `npm install @tailbus/sdk`
@@ -342,7 +346,7 @@ Working MVP with real security and NAT traversal: coord server + node daemons + 
 | Item | Why | Effort |
 |------|-----|--------|
 | **P2.4 — Message persistence** | Daemon restart losing all state is not production-grade. ACKs are useless without durable retry. | Large |
-| **P4.1 — Python SDK** | Meet agents where they live. 90% of AI agents are Python. | Medium |
+| ~~**P4.1 — Python SDK**~~ | ✓ Done. Async/sync SDK wrapping stdio bridge, zero deps, 46 tests. | ~~Medium~~ |
 | **P2.3 — Backpressure** | Silent message drops are a time bomb. Need explicit signals. | Medium |
 | **P1.5 — Coord admission control** | Prevent unauthorized nodes from joining the mesh. | Small |
 

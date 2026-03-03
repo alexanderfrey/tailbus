@@ -8,5 +8,11 @@ bin/
 *.db-shm
 *.key
 
+# Python
+__pycache__/
+*.pyc
+*.egg-info/
+.pytest_cache/
+
 # OS
 .DS_Store

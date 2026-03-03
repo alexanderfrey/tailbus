@@ -504,7 +504,7 @@ The `tailbus agent` subcommand provides a **JSON-lines stdio bridge** so any pro
 - Errors include `request_type` for correlation
 - The bridge exits on stdin EOF or SIGINT
 
-### Example: Python agent
+### Example: Python agent (raw subprocess)
 
 ```python
 import subprocess, json
@@ -521,6 +521,78 @@ def send(cmd):
 
 print(send({"type": "register", "handle": "my-python-agent"}))
 print(send({"type": "open", "to": "sales", "payload": "hello from python"}))
+```
+
+## Python SDK
+
+The `tailbus` Python package (`sdk/python/`) wraps the stdio bridge in a clean async/sync API with zero external dependencies. Requires Python 3.10+.
+
+### Install
+
+```bash
+pip install sdk/python/         # from source
+# or: pip install tailbus       # once published to PyPI
+```
+
+### Async usage
+
+```python
+from tailbus import AsyncAgent, Manifest, CommandSpec
+import asyncio
+
+async def main():
+    manifest = Manifest(
+        description="Marketing agent",
+        commands=(CommandSpec("campaign", "Run a campaign"),),
+        tags=("marketing",),
+    )
+    async with AsyncAgent("marketing", manifest=manifest) as agent:
+        await agent.register()
+
+        # Discover other agents
+        handles = await agent.list_handles()
+        print([h.handle for h in handles])
+
+        # Open a session and exchange messages
+        opened = await agent.open_session("sales", "Need Q4 numbers")
+        await agent.send(opened.session, "follow-up details")
+        await agent.resolve(opened.session, "Thanks!")
+
+asyncio.run(main())
+```
+
+### Sync usage
+
+```python
+from tailbus import SyncAgent
+
+with SyncAgent("my-agent") as agent:
+    agent.register()
+    opened = agent.open_session("sales", "hello")
+    agent.send(opened.session, "follow-up")
+    agent.resolve(opened.session, "done")
+```
+
+### Handling incoming messages
+
+```python
+from tailbus import AsyncAgent, Message
+import asyncio
+
+async def main():
+    async with AsyncAgent("responder") as agent:
+        await agent.register()
+
+        @agent.on_message
+        async def handler(msg: Message):
+            print(f"{msg.from_handle}: {msg.payload}")
+            if msg.message_type == "session_open":
+                await agent.send(msg.session, "got it!")
+                await agent.resolve(msg.session)
+
+        await agent.run_forever()
+
+asyncio.run(main())
 ```
 
 ## @-Mention Auto-Routing
