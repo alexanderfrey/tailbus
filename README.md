@@ -44,6 +44,7 @@ Think of it as **Slack for autonomous agents** — agents register handles, open
 - **Delivery ACKs with retry** — successful delivery generates an ACK back to sender; unacknowledged messages retry with backoff (5s timeout, 3 max retries)
 - **Message persistence** — bbolt-backed store on each daemon; sessions and pending messages survive daemon restarts; ACKed messages purged automatically
 - **MCP gateway** — HTTP server on daemon exposing handles as MCP tools; any MCP-compatible LLM (Claude, ChatGPT, Cursor) can discover and invoke tailbus agents with zero SDK code
+- **Web chat UI** — browser-based chat interface embedded in the daemon binary via `go:embed`; select agents, send messages, view responses in real time at the MCP gateway address
 - **Coord admission control** — pre-auth token system (like `tailscale up --authkey`) gates which nodes can join the mesh; open mode (no tokens configured) preserves zero-config default
 - **Health & readiness endpoints** — `/healthz`, `/readyz`, and `/debug/pprof/*` on daemon metrics port (alongside `/metrics`), coord, and relay servers
 - **Docker Compose** — `docker compose up` for a full mesh with coord + 2 daemons + MCP gateway + example agents in 30 seconds
@@ -95,7 +96,9 @@ The fastest way to try tailbus — a full mesh with MCP gateway in 30 seconds:
 docker compose up --build
 ```
 
-This starts: coord server + 2 daemons + MCP gateway (port 8080) + 3 example Python agents (calculator, echo, orchestrator).
+This starts: coord server + 2 daemons + MCP gateway with web UI (port 8080) + 3 example Python agents (calculator, echo, orchestrator).
+
+Open http://localhost:8080 in your browser for the chat UI — select an agent from the sidebar and start chatting.
 
 Test with curl:
 
@@ -448,6 +451,9 @@ Enable with `-mcp :8080` on the daemon (or `mcp_addr = ":8080"` in config). The 
 |--------|------|-------------|
 | `POST` | `/mcp` | JSON-RPC 2.0 requests (`initialize`, `tools/list`, `tools/call`, `ping`) |
 | `GET`  | `/mcp` | SSE stream for server-initiated messages |
+| `GET`  | `/api/agents` | REST: list all agents as JSON |
+| `POST` | `/api/send` | REST: send a message to an agent (`{"handle":"…","message":"…"}`) |
+| `GET`  | `/` | Web chat UI (embedded static files) |
 
 **Example: configure as MCP server in Claude Desktop**
 
@@ -488,8 +494,10 @@ internal/
     tracestore.go             Ring buffer trace span storage
     metrics.go                Prometheus collector + HTTP server (includes health routes)
 
-  mcp/                      MCP gateway
+  mcp/                      MCP gateway + web UI
     gateway.go                HTTP+SSE server exposing handles as MCP tools
+    embed.go                  go:embed for static web assets
+    web/index.html            Single-page chat UI (HTML/CSS/JS)
 
   health/                   Health, readiness, and pprof endpoints
 

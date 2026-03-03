@@ -1,5 +1,6 @@
 # Binaries
 bin/
+/tailbus
 *.exe
 
 # Data
@@ -7,6 +8,9 @@ bin/
 *.db-wal
 *.db-shm
 *.key
+
+# Claude Code
+.claude/
 
 # Python
 __pycache__/

@@ -118,12 +118,85 @@ func (g *Gateway) subscribeLoop(ctx context.Context) {
 	}
 }
 
-// Handler returns the HTTP handler for the MCP gateway.
+// Handler returns the HTTP handler for the MCP gateway + web UI + REST API.
 func (g *Gateway) Handler() http.Handler {
 	mux := http.NewServeMux()
+
+	// MCP protocol endpoints
 	mux.HandleFunc("POST /mcp", g.handleMCP)
 	mux.HandleFunc("GET /mcp", g.handleMCPSSE)
+
+	// REST API for web UI
+	mux.HandleFunc("GET /api/agents", g.handleAPIAgents)
+	mux.HandleFunc("POST /api/send", g.handleAPISend)
+
+	// Web UI (embedded static files)
+	mux.Handle("/", http.FileServer(http.FS(webUIFS())))
+
 	return mux
+}
+
+// handleAPIAgents returns all agents on the mesh as JSON.
+func (g *Gateway) handleAPIAgents(w http.ResponseWriter, r *http.Request) {
+	resp, err := g.agent.ListHandles(r.Context(), &agentpb.ListHandlesRequest{})
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	type agentInfo struct {
+		Handle      string   `json:"handle"`
+		Description string   `json:"description"`
+		Tags        []string `json:"tags"`
+		Version     string   `json:"version"`
+	}
+
+	var agents []agentInfo
+	for _, entry := range resp.Entries {
+		if entry.Handle == mcpGatewayHandle {
+			continue
+		}
+		a := agentInfo{Handle: entry.Handle}
+		if entry.Manifest != nil {
+			a.Description = entry.Manifest.Description
+			a.Tags = entry.Manifest.Tags
+			a.Version = entry.Manifest.Version
+		}
+		agents = append(agents, a)
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(agents)
+}
+
+// handleAPISend sends a message to an agent and returns the response.
+func (g *Gateway) handleAPISend(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Handle  string `json:"handle"`
+		Message string `json:"message"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	callCtx, cancel := context.WithTimeout(r.Context(), defaultCallTimeout)
+	defer cancel()
+
+	result, err := g.callAgent(callCtx, req.Handle, []byte(req.Message))
+
+	w.Header().Set("Content-Type", "application/json")
+	if err != nil {
+		json.NewEncoder(w).Encode(map[string]any{
+			"error":   true,
+			"message": err.Error(),
+		})
+		return
+	}
+	json.NewEncoder(w).Encode(map[string]any{
+		"error":   false,
+		"message": result,
+	})
 }
 
 // handleMCP handles JSON-RPC requests over HTTP POST (streamable HTTP transport).

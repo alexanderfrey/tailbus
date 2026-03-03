@@ -2,7 +2,7 @@
 
 ## Where we are today
 
-Working MVP with real security, NAT traversal, persistence, and MCP integration: coord server + node daemons + P2P gRPC transport + relay server + CLI + TUI dashboard + Prometheus metrics + distributed tracing + stdio bridge + MCP gateway + Docker Compose. **Phase 1 hardening complete:** mTLS on all connections (P2P, relay, and coord), per-connection handle ownership on the Unix socket, Unix socket token auth, coord admission control (pre-auth tokens), per-session sequence numbers, and delivery ACKs with retry. **Phase 2 reliability:** message persistence via bbolt — sessions and pending messages survive daemon restarts. **Phase 3 NAT traversal:** DERP-style relay server enables message delivery across NAT boundaries. **Phase 4 SDKs:** Python SDK (async/sync, zero deps) wrapping the stdio bridge. **Phase 5 protocol bridges:** MCP gateway exposes handles as MCP tools — any MCP-compatible LLM can use tailbus agents. **Phase 10 deployment:** Docker Compose with coord + 2 daemons + MCP gateway + 3 example agents.
+Working MVP with real security, NAT traversal, persistence, and MCP integration: coord server + node daemons + P2P gRPC transport + relay server + CLI + TUI dashboard + Prometheus metrics + distributed tracing + stdio bridge + MCP gateway + Docker Compose. **Phase 1 hardening complete:** mTLS on all connections (P2P, relay, and coord), per-connection handle ownership on the Unix socket, Unix socket token auth, coord admission control (pre-auth tokens), per-session sequence numbers, and delivery ACKs with retry. **Phase 2 reliability:** message persistence via bbolt — sessions and pending messages survive daemon restarts. **Phase 3 NAT traversal:** DERP-style relay server enables message delivery across NAT boundaries. **Phase 4 SDKs:** Python SDK (async/sync, zero deps) wrapping the stdio bridge. **Phase 5 protocol bridges:** MCP gateway exposes handles as MCP tools — any MCP-compatible LLM can use tailbus agents. **Phase 9 observability:** Web chat UI embedded in daemon binary for browser-based agent interaction. **Phase 10 deployment:** Docker Compose with coord + 2 daemons + MCP gateway + web UI + 3 example agents.
 
 **What works:**
 - Agents register handles, open sessions, exchange messages, resolve conversations
@@ -15,7 +15,8 @@ Working MVP with real security, NAT traversal, persistence, and MCP integration:
 - Every envelope carries a monotonic sequence number; delivered messages generate ACKs; unacked messages retry (5s timeout, 3 retries)
 - Message persistence — bbolt-backed store on each daemon; sessions and pending messages survive restart; ACKed messages purged automatically
 - MCP gateway — HTTP server on daemon exposing handles as MCP tools; `tools/list` returns handle manifests, `tools/call` opens session + sends + waits for response
-- Docker Compose — `docker compose up` gives you a full mesh with coord + 2 daemons + MCP gateway + 3 example Python agents
+- Docker Compose — `docker compose up` gives you a full mesh with coord + 2 daemons + MCP gateway + web UI + 3 example Python agents
+- Web chat UI — embedded in daemon binary, served at MCP gateway address; agent sidebar, per-agent chat, responsive dark theme
 - `/healthz`, `/readyz`, and `/debug/pprof/*` endpoints on daemon metrics port, coord, and relay
 - Python SDK (`sdk/python/`) — `AsyncAgent` and `SyncAgent` with zero external dependencies
 - Service manifests, @-mention routing, tracing, Prometheus metrics, TUI dashboard
@@ -306,11 +307,13 @@ Working MVP with real security, NAT traversal, persistence, and MCP integration:
 - Panels: message throughput, session lifetime histograms, active handles, peer connectivity
 - Alerting rules: peer disconnected, message drop rate, DLQ depth
 
-### P9.5 — Web dashboard
-- Replace TUI-only dashboard with a web UI
-- Real-time topology visualization (nodes, handles, connections)
-- Message flow animation, session inspector, trace viewer
-- Served by daemon on configurable port
+### ~~P9.5 — Web chat UI~~ ✓ DONE
+- Browser-based chat interface embedded in the daemon binary via `go:embed` (`internal/mcp/web/index.html`)
+- Served at the MCP gateway address alongside MCP endpoints
+- Dark-theme responsive SPA: agent sidebar with auto-refresh, per-agent chat history, real-time send/receive
+- REST API: `GET /api/agents` (list agents), `POST /api/send` (send message, wait for response)
+- Works on desktop and mobile — zero install, just open the URL
+- Future: topology visualization, session inspector, trace viewer
 
 ---
 
