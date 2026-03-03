@@ -23,6 +23,7 @@ type MessageRouter struct {
 	traceStore *TraceStore
 	metrics    *Metrics
 	nodeID     string
+	ackTracker *AckTracker
 }
 
 // LocalDeliverer delivers messages to local agents.
@@ -49,6 +50,11 @@ func (r *MessageRouter) SetTracing(ts *TraceStore, m *Metrics, nodeID string) {
 	r.nodeID = nodeID
 }
 
+// SetAckTracker sets the ACK tracker for the router.
+func (r *MessageRouter) SetAckTracker(at *AckTracker) {
+	r.ackTracker = at
+}
+
 // Route routes an envelope to the appropriate destination.
 func (r *MessageRouter) Route(_ context.Context, env *messagepb.Envelope) error {
 	start := time.Now()
@@ -71,6 +77,11 @@ func (r *MessageRouter) Route(_ context.Context, env *messagepb.Envelope) error 
 	r.logger.Debug("routing to remote peer", "handle", env.ToHandle, "peer", peer.NodeID, "addr", peer.AdvertiseAddr)
 	if err := r.transport.Send(peer.AdvertiseAddr, env); err != nil {
 		return err
+	}
+
+	// Track for ACK (don't track ACK messages themselves)
+	if r.ackTracker != nil && env.Type != messagepb.EnvelopeType_ENVELOPE_TYPE_ACK {
+		r.ackTracker.Track(env, peer.AdvertiseAddr)
 	}
 
 	r.recordRouteDone(env, true, start)

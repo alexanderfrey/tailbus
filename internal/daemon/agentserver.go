@@ -78,6 +78,9 @@ type AgentServer struct {
 	connHandles map[uint64]map[string]bool // connID -> set of handles
 	handleOwner map[string]uint64          // handle -> owning connID
 
+	// ACK tracking
+	ackTracker *AckTracker
+
 	// Dashboard dependencies (set via SetDashboardDeps)
 	dashResolver  *handle.Resolver
 	dashTransport *transport.GRPCTransport
@@ -118,6 +121,11 @@ func (s *AgentServer) SetDashboardDeps(nodeID string, resolver *handle.Resolver,
 func (s *AgentServer) SetTracing(ts *TraceStore, m *Metrics) {
 	s.traceStore = ts
 	s.metrics = m
+}
+
+// SetAckTracker sets the ACK tracker for delivery acknowledgement.
+func (s *AgentServer) SetAckTracker(at *AckTracker) {
+	s.ackTracker = at
 }
 
 // ServeUnix starts the gRPC server on a Unix socket.
@@ -228,6 +236,14 @@ func (s *AgentServer) GetHandles() []string {
 
 // DeliverToLocal delivers an envelope to local subscribers. Returns true if delivered.
 func (s *AgentServer) DeliverToLocal(env *messagepb.Envelope) bool {
+	// Handle incoming ACK: acknowledge and never forward to subscribers
+	if env.Type == messagepb.EnvelopeType_ENVELOPE_TYPE_ACK {
+		if s.ackTracker != nil && env.AckId != "" {
+			s.ackTracker.Acknowledge(env.AckId)
+		}
+		return true
+	}
+
 	s.mu.RLock()
 	subs := s.subscribers[env.ToHandle]
 	s.mu.RUnlock()
@@ -253,6 +269,24 @@ func (s *AgentServer) DeliverToLocal(env *messagepb.Envelope) bool {
 		s.traceStore.RecordSpan(env.TraceId, env.MessageId, s.nodeID, agentpb.TraceAction_TRACE_ACTION_DELIVERED_TO_SUBSCRIBER, map[string]string{
 			"to": env.ToHandle,
 		})
+	}
+
+	// Send ACK back to sender (best-effort, async)
+	if s.router != nil && env.FromHandle != "" {
+		ack := &messagepb.Envelope{
+			MessageId:  uuid.New().String(),
+			SessionId:  env.SessionId,
+			FromHandle: env.ToHandle,
+			ToHandle:   env.FromHandle,
+			Type:       messagepb.EnvelopeType_ENVELOPE_TYPE_ACK,
+			AckId:      env.MessageId,
+			SentAtUnix: time.Now().Unix(),
+		}
+		go func() {
+			if err := s.router.Route(context.Background(), ack); err != nil {
+				s.logger.Debug("ACK route failed", "ack_for", env.MessageId, "error", err)
+			}
+		}()
 	}
 
 	return true

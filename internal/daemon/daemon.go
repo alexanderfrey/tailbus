@@ -33,6 +33,7 @@ type Daemon struct {
 	activity    *ActivityBus
 	traceStore  *TraceStore
 	metrics     *Metrics
+	ackTracker  *AckTracker
 }
 
 // New creates a new daemon from config.
@@ -78,8 +79,15 @@ func New(cfg *config.DaemonConfig, logger *slog.Logger) (*Daemon, error) {
 	router := NewMessageRouter(resolver, tp, agentSrv, activity, logger)
 	router.SetTracing(traceStore, metrics, cfg.NodeID)
 	agentSrv.router = router
+
+	// Create ACK tracker and wire into agent server + router
+	ackTracker := NewAckTracker(tp.Send, logger)
+	agentSrv.SetAckTracker(ackTracker)
+	router.SetAckTracker(ackTracker)
+
 	d.agentServer = agentSrv
 	d.router = router
+	d.ackTracker = ackTracker
 
 	// Set up transport callbacks
 	tp.OnSend(func(env *messagepb.Envelope) {
@@ -105,6 +113,9 @@ func (d *Daemon) Run(ctx context.Context) error {
 
 	// Start session eviction (5min TTL, 30s sweep)
 	d.sessions.StartEviction(ctx, 5*time.Minute, 30*time.Second, d.logger)
+
+	// Start ACK retry loop
+	go d.ackTracker.StartRetryLoop(ctx, time.Second)
 
 	// Wire dashboard dependencies
 	d.agentServer.SetDashboardDeps(d.cfg.NodeID, d.resolver, d.transport)
