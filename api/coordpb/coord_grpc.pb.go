@@ -19,15 +19,18 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	CoordinationAPI_RegisterNode_FullMethodName     = "/tailbus.v1.CoordinationAPI/RegisterNode"
-	CoordinationAPI_WatchPeerMap_FullMethodName     = "/tailbus.v1.CoordinationAPI/WatchPeerMap"
-	CoordinationAPI_LookupHandle_FullMethodName     = "/tailbus.v1.CoordinationAPI/LookupHandle"
-	CoordinationAPI_Heartbeat_FullMethodName        = "/tailbus.v1.CoordinationAPI/Heartbeat"
-	CoordinationAPI_CreateTeam_FullMethodName       = "/tailbus.v1.CoordinationAPI/CreateTeam"
-	CoordinationAPI_ListTeams_FullMethodName        = "/tailbus.v1.CoordinationAPI/ListTeams"
-	CoordinationAPI_GetTeamMembers_FullMethodName   = "/tailbus.v1.CoordinationAPI/GetTeamMembers"
-	CoordinationAPI_CreateTeamInvite_FullMethodName = "/tailbus.v1.CoordinationAPI/CreateTeamInvite"
-	CoordinationAPI_AcceptTeamInvite_FullMethodName = "/tailbus.v1.CoordinationAPI/AcceptTeamInvite"
+	CoordinationAPI_RegisterNode_FullMethodName         = "/tailbus.v1.CoordinationAPI/RegisterNode"
+	CoordinationAPI_WatchPeerMap_FullMethodName         = "/tailbus.v1.CoordinationAPI/WatchPeerMap"
+	CoordinationAPI_LookupHandle_FullMethodName         = "/tailbus.v1.CoordinationAPI/LookupHandle"
+	CoordinationAPI_Heartbeat_FullMethodName            = "/tailbus.v1.CoordinationAPI/Heartbeat"
+	CoordinationAPI_CreateTeam_FullMethodName           = "/tailbus.v1.CoordinationAPI/CreateTeam"
+	CoordinationAPI_ListTeams_FullMethodName            = "/tailbus.v1.CoordinationAPI/ListTeams"
+	CoordinationAPI_GetTeamMembers_FullMethodName       = "/tailbus.v1.CoordinationAPI/GetTeamMembers"
+	CoordinationAPI_CreateTeamInvite_FullMethodName     = "/tailbus.v1.CoordinationAPI/CreateTeamInvite"
+	CoordinationAPI_AcceptTeamInvite_FullMethodName     = "/tailbus.v1.CoordinationAPI/AcceptTeamInvite"
+	CoordinationAPI_RemoveTeamMember_FullMethodName     = "/tailbus.v1.CoordinationAPI/RemoveTeamMember"
+	CoordinationAPI_UpdateTeamMemberRole_FullMethodName = "/tailbus.v1.CoordinationAPI/UpdateTeamMemberRole"
+	CoordinationAPI_DeleteTeam_FullMethodName           = "/tailbus.v1.CoordinationAPI/DeleteTeam"
 )
 
 // CoordinationAPIClient is the client API for CoordinationAPI service.
@@ -43,6 +46,9 @@ type CoordinationAPIClient interface {
 	GetTeamMembers(ctx context.Context, in *GetTeamMembersRequest, opts ...grpc.CallOption) (*GetTeamMembersResponse, error)
 	CreateTeamInvite(ctx context.Context, in *CreateTeamInviteRequest, opts ...grpc.CallOption) (*CreateTeamInviteResponse, error)
 	AcceptTeamInvite(ctx context.Context, in *AcceptTeamInviteRequest, opts ...grpc.CallOption) (*AcceptTeamInviteResponse, error)
+	RemoveTeamMember(ctx context.Context, in *RemoveTeamMemberRequest, opts ...grpc.CallOption) (*RemoveTeamMemberResponse, error)
+	UpdateTeamMemberRole(ctx context.Context, in *UpdateTeamMemberRoleRequest, opts ...grpc.CallOption) (*UpdateTeamMemberRoleResponse, error)
+	DeleteTeam(ctx context.Context, in *DeleteTeamRequest, opts ...grpc.CallOption) (*DeleteTeamResponse, error)
 }
 
 type coordinationAPIClient struct {
@@ -152,6 +158,36 @@ func (c *coordinationAPIClient) AcceptTeamInvite(ctx context.Context, in *Accept
 	return out, nil
 }
 
+func (c *coordinationAPIClient) RemoveTeamMember(ctx context.Context, in *RemoveTeamMemberRequest, opts ...grpc.CallOption) (*RemoveTeamMemberResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(RemoveTeamMemberResponse)
+	err := c.cc.Invoke(ctx, CoordinationAPI_RemoveTeamMember_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *coordinationAPIClient) UpdateTeamMemberRole(ctx context.Context, in *UpdateTeamMemberRoleRequest, opts ...grpc.CallOption) (*UpdateTeamMemberRoleResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(UpdateTeamMemberRoleResponse)
+	err := c.cc.Invoke(ctx, CoordinationAPI_UpdateTeamMemberRole_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *coordinationAPIClient) DeleteTeam(ctx context.Context, in *DeleteTeamRequest, opts ...grpc.CallOption) (*DeleteTeamResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(DeleteTeamResponse)
+	err := c.cc.Invoke(ctx, CoordinationAPI_DeleteTeam_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // CoordinationAPIServer is the server API for CoordinationAPI service.
 // All implementations must embed UnimplementedCoordinationAPIServer
 // for forward compatibility.
@@ -165,6 +201,9 @@ type CoordinationAPIServer interface {
 	GetTeamMembers(context.Context, *GetTeamMembersRequest) (*GetTeamMembersResponse, error)
 	CreateTeamInvite(context.Context, *CreateTeamInviteRequest) (*CreateTeamInviteResponse, error)
 	AcceptTeamInvite(context.Context, *AcceptTeamInviteRequest) (*AcceptTeamInviteResponse, error)
+	RemoveTeamMember(context.Context, *RemoveTeamMemberRequest) (*RemoveTeamMemberResponse, error)
+	UpdateTeamMemberRole(context.Context, *UpdateTeamMemberRoleRequest) (*UpdateTeamMemberRoleResponse, error)
+	DeleteTeam(context.Context, *DeleteTeamRequest) (*DeleteTeamResponse, error)
 	mustEmbedUnimplementedCoordinationAPIServer()
 }
 
@@ -201,6 +240,15 @@ func (UnimplementedCoordinationAPIServer) CreateTeamInvite(context.Context, *Cre
 }
 func (UnimplementedCoordinationAPIServer) AcceptTeamInvite(context.Context, *AcceptTeamInviteRequest) (*AcceptTeamInviteResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method AcceptTeamInvite not implemented")
+}
+func (UnimplementedCoordinationAPIServer) RemoveTeamMember(context.Context, *RemoveTeamMemberRequest) (*RemoveTeamMemberResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method RemoveTeamMember not implemented")
+}
+func (UnimplementedCoordinationAPIServer) UpdateTeamMemberRole(context.Context, *UpdateTeamMemberRoleRequest) (*UpdateTeamMemberRoleResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method UpdateTeamMemberRole not implemented")
+}
+func (UnimplementedCoordinationAPIServer) DeleteTeam(context.Context, *DeleteTeamRequest) (*DeleteTeamResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method DeleteTeam not implemented")
 }
 func (UnimplementedCoordinationAPIServer) mustEmbedUnimplementedCoordinationAPIServer() {}
 func (UnimplementedCoordinationAPIServer) testEmbeddedByValue()                         {}
@@ -378,6 +426,60 @@ func _CoordinationAPI_AcceptTeamInvite_Handler(srv interface{}, ctx context.Cont
 	return interceptor(ctx, in, info, handler)
 }
 
+func _CoordinationAPI_RemoveTeamMember_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(RemoveTeamMemberRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(CoordinationAPIServer).RemoveTeamMember(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: CoordinationAPI_RemoveTeamMember_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(CoordinationAPIServer).RemoveTeamMember(ctx, req.(*RemoveTeamMemberRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _CoordinationAPI_UpdateTeamMemberRole_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(UpdateTeamMemberRoleRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(CoordinationAPIServer).UpdateTeamMemberRole(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: CoordinationAPI_UpdateTeamMemberRole_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(CoordinationAPIServer).UpdateTeamMemberRole(ctx, req.(*UpdateTeamMemberRoleRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _CoordinationAPI_DeleteTeam_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(DeleteTeamRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(CoordinationAPIServer).DeleteTeam(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: CoordinationAPI_DeleteTeam_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(CoordinationAPIServer).DeleteTeam(ctx, req.(*DeleteTeamRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // CoordinationAPI_ServiceDesc is the grpc.ServiceDesc for CoordinationAPI service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -416,6 +518,18 @@ var CoordinationAPI_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "AcceptTeamInvite",
 			Handler:    _CoordinationAPI_AcceptTeamInvite_Handler,
+		},
+		{
+			MethodName: "RemoveTeamMember",
+			Handler:    _CoordinationAPI_RemoveTeamMember_Handler,
+		},
+		{
+			MethodName: "UpdateTeamMemberRole",
+			Handler:    _CoordinationAPI_UpdateTeamMemberRole_Handler,
+		},
+		{
+			MethodName: "DeleteTeam",
+			Handler:    _CoordinationAPI_DeleteTeam_Handler,
 		},
 	},
 	Streams: []grpc.StreamDesc{

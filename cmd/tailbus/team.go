@@ -24,6 +24,9 @@ func runTeam(args []string, logger *slog.Logger) {
 		fmt.Println("  invite <name>              Generate invite code")
 		fmt.Println("  join <code>                Accept invite and join team")
 		fmt.Println("  switch <name>              Set active team in credentials")
+		fmt.Println("  remove <name> <email>      Remove a member (owner only)")
+		fmt.Println("  role <name> <email> <role>  Change member role (owner only)")
+		fmt.Println("  delete <name>              Delete a team (owner only)")
 		os.Exit(1)
 	}
 
@@ -40,6 +43,12 @@ func runTeam(args []string, logger *slog.Logger) {
 		teamJoin(args[1:], logger)
 	case "switch":
 		teamSwitch(args[1:], logger)
+	case "remove":
+		teamRemove(args[1:], logger)
+	case "role":
+		teamRole(args[1:], logger)
+	case "delete":
+		teamDelete(args[1:], logger)
 	default:
 		fmt.Printf("Unknown team subcommand: %s\n", args[0])
 		os.Exit(1)
@@ -324,6 +333,122 @@ func teamSwitch(args []string, logger *slog.Logger) {
 	}
 	fmt.Printf("Active team set to %q (ID: %s)\n", name, teamID)
 	fmt.Println("Restart tailbusd for the change to take effect.")
+}
+
+func teamRemove(args []string, logger *slog.Logger) {
+	fs := flag.NewFlagSet("team remove", flag.ExitOnError)
+	credsFlag, _ := defaultCredsPath(fs)
+	fs.Parse(args)
+	if fs.NArg() < 2 {
+		fmt.Println("Usage: tailbus team remove <team-name> <email>")
+		os.Exit(1)
+	}
+	name := fs.Arg(0)
+	email := fs.Arg(1)
+	credsPath := resolveCredsPath(credsFlag)
+
+	client, creds, cleanup := teamCoordClient(credsPath)
+	defer cleanup()
+
+	teamID := resolveTeamIDByName(client, creds, name, logger)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	resp, err := client.RemoveTeamMember(ctx, &pb.RemoveTeamMemberRequest{
+		AuthToken: creds.AccessToken,
+		TeamId:    teamID,
+		Email:     email,
+	})
+	if err != nil {
+		logger.Error("remove member failed", "error", err)
+		os.Exit(1)
+	}
+	if resp.Error != "" {
+		fmt.Fprintf(os.Stderr, "Error: %s\n", resp.Error)
+		os.Exit(1)
+	}
+	fmt.Printf("Removed %s from %s\n", email, name)
+}
+
+func teamRole(args []string, logger *slog.Logger) {
+	fs := flag.NewFlagSet("team role", flag.ExitOnError)
+	credsFlag, _ := defaultCredsPath(fs)
+	fs.Parse(args)
+	if fs.NArg() < 3 {
+		fmt.Println("Usage: tailbus team role <team-name> <email> <owner|member>")
+		os.Exit(1)
+	}
+	name := fs.Arg(0)
+	email := fs.Arg(1)
+	role := fs.Arg(2)
+	credsPath := resolveCredsPath(credsFlag)
+
+	client, creds, cleanup := teamCoordClient(credsPath)
+	defer cleanup()
+
+	teamID := resolveTeamIDByName(client, creds, name, logger)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	resp, err := client.UpdateTeamMemberRole(ctx, &pb.UpdateTeamMemberRoleRequest{
+		AuthToken: creds.AccessToken,
+		TeamId:    teamID,
+		Email:     email,
+		Role:      role,
+	})
+	if err != nil {
+		logger.Error("update role failed", "error", err)
+		os.Exit(1)
+	}
+	if resp.Error != "" {
+		fmt.Fprintf(os.Stderr, "Error: %s\n", resp.Error)
+		os.Exit(1)
+	}
+	fmt.Printf("Updated %s to %s in %s\n", email, role, name)
+}
+
+func teamDelete(args []string, logger *slog.Logger) {
+	fs := flag.NewFlagSet("team delete", flag.ExitOnError)
+	credsFlag, _ := defaultCredsPath(fs)
+	fs.Parse(args)
+	if fs.NArg() < 1 {
+		fmt.Println("Usage: tailbus team delete <team-name>")
+		os.Exit(1)
+	}
+	name := fs.Arg(0)
+	credsPath := resolveCredsPath(credsFlag)
+
+	client, creds, cleanup := teamCoordClient(credsPath)
+	defer cleanup()
+
+	teamID := resolveTeamIDByName(client, creds, name, logger)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	resp, err := client.DeleteTeam(ctx, &pb.DeleteTeamRequest{
+		AuthToken: creds.AccessToken,
+		TeamId:    teamID,
+	})
+	if err != nil {
+		logger.Error("delete team failed", "error", err)
+		os.Exit(1)
+	}
+	if resp.Error != "" {
+		fmt.Fprintf(os.Stderr, "Error: %s\n", resp.Error)
+		os.Exit(1)
+	}
+	fmt.Printf("Team %q deleted\n", name)
+
+	// Clear from credentials if it was the active team
+	if creds.TeamID == teamID {
+		creds.TeamID = ""
+		creds.TeamName = ""
+		auth.SaveCredentials(credsPath, creds)
+		fmt.Println("Active team cleared (was the deleted team).")
+	}
 }
 
 // resolveTeamIDByName lists the user's teams and finds one by name.

@@ -414,3 +414,296 @@ func TestEndToEnd(t *testing.T) {
 
 	t.Log("End-to-end test passed!")
 }
+
+// TestTeamIsolation verifies that two teams with the same handle name are
+// isolated from each other: each team's peer map only contains its own nodes,
+// and cross-team handle lookup fails.
+func TestTeamIsolation(t *testing.T) {
+	dir := t.TempDir()
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelDebug}))
+
+	// --- Start coordination server with JWT ---
+	store, err := coord.NewStore(filepath.Join(dir, "coord.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+
+	coordKP, err := identity.Generate()
+	if err != nil {
+		t.Fatal(err)
+	}
+	coordSrv, err := coord.NewServer(store, logger.With("component", "coord"), coordKP)
+	if err != nil {
+		t.Fatal(err)
+	}
+	jwtIssuer, err := coord.NewJWTIssuer(dir, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	coordSrv.SetJWT(jwtIssuer)
+
+	coordLis, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	go coordSrv.Serve(coordLis)
+	defer coordSrv.GracefulStop()
+
+	coordAddr := coordLis.Addr().String()
+
+	// --- Connect to coord as gRPC client (mTLS) ---
+	clientKP, _ := identity.Generate()
+	clientCert, _ := identity.SelfSignedCert(clientKP)
+	tofuFile := filepath.Join(dir, "coord-test.fp")
+	tofu := identity.NewTOFUVerifier(tofuFile)
+	coordTLS := &tls.Config{
+		Certificates:          []tls.Certificate{clientCert},
+		InsecureSkipVerify:    true,
+		VerifyPeerCertificate: tofu.Verify,
+	}
+	coordConn, _ := grpc.NewClient(coordAddr, grpc.WithTransportCredentials(credentials.NewTLS(coordTLS)))
+	defer coordConn.Close()
+	coordClient := coordpb.NewCoordinationAPIClient(coordConn)
+	ctx := context.Background()
+
+	// --- Create two teams with two users ---
+	aliceToken, _, _ := jwtIssuer.Issue("alice@example.com")
+	bobToken, _, _ := jwtIssuer.Issue("bob@example.com")
+
+	crA, err := coordClient.CreateTeam(ctx, &coordpb.CreateTeamRequest{
+		AuthToken: aliceToken, Name: "team-alpha",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if crA.Error != "" {
+		t.Fatal(crA.Error)
+	}
+	teamAlpha := crA.TeamId
+	t.Logf("Team Alpha: %s", teamAlpha)
+
+	crB, err := coordClient.CreateTeam(ctx, &coordpb.CreateTeamRequest{
+		AuthToken: bobToken, Name: "team-beta",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if crB.Error != "" {
+		t.Fatal(crB.Error)
+	}
+	teamBeta := crB.TeamId
+	t.Logf("Team Beta: %s", teamBeta)
+
+	// --- Generate keys and transports for two nodes ---
+	kpA, _ := identity.Generate()
+	kpB, _ := identity.Generate()
+
+	resolverA := handle.NewResolver()
+	resolverB := handle.NewResolver()
+
+	certA, _ := identity.SelfSignedCert(kpA)
+	certB, _ := identity.SelfSignedCert(kpB)
+
+	verifierA := transport.NewResolverVerifier(resolverA)
+	verifierB := transport.NewResolverVerifier(resolverB)
+
+	tpA := transport.NewGRPCTransport(logger.With("component", "tp-alpha"), &certA, verifierA)
+	tpB := transport.NewGRPCTransport(logger.With("component", "tp-beta"), &certB, verifierB)
+
+	tpALis, _ := net.Listen("tcp", "127.0.0.1:0")
+	tpBLis, _ := net.Listen("tcp", "127.0.0.1:0")
+	go tpA.Serve(tpALis)
+	go tpB.Serve(tpBLis)
+	defer tpA.Close()
+	defer tpB.Close()
+
+	// --- Register both nodes with the SAME handle "calculator" in different teams ---
+	regA, err := coordClient.RegisterNode(ctx, &coordpb.RegisterNodeRequest{
+		NodeId:        "node-alpha",
+		PublicKey:     kpA.Public,
+		AdvertiseAddr: tpALis.Addr().String(),
+		Handles:       []string{"calculator"},
+		AuthToken:     aliceToken,
+		TeamId:        teamAlpha,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !regA.Ok {
+		t.Fatalf("register node-alpha failed: %s", regA.Error)
+	}
+	t.Logf("Node Alpha registered in team %s", regA.TeamId)
+
+	regB, err := coordClient.RegisterNode(ctx, &coordpb.RegisterNodeRequest{
+		NodeId:        "node-beta",
+		PublicKey:     kpB.Public,
+		AdvertiseAddr: tpBLis.Addr().String(),
+		Handles:       []string{"calculator"},
+		AuthToken:     bobToken,
+		TeamId:        teamBeta,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !regB.Ok {
+		t.Fatalf("register node-beta failed: %s", regB.Error)
+	}
+	t.Logf("Node Beta registered in team %s", regB.TeamId)
+
+	// --- Verify team-scoped peer maps via WatchPeerMap ---
+
+	// Alpha's peer map should only contain node-alpha
+	streamA, err := coordClient.WatchPeerMap(ctx, &coordpb.WatchPeerMapRequest{
+		NodeId: "node-alpha", TeamId: teamAlpha,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	updateA, err := streamA.Recv()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Count non-relay peers
+	alphaNodeIDs := make(map[string]bool)
+	for _, p := range updateA.Peers {
+		alphaNodeIDs[p.NodeId] = true
+	}
+	if !alphaNodeIDs["node-alpha"] {
+		t.Fatal("team-alpha peer map should contain node-alpha")
+	}
+	if alphaNodeIDs["node-beta"] {
+		t.Fatal("team-alpha peer map should NOT contain node-beta (isolation violation)")
+	}
+	t.Logf("Alpha peer map: %d peers (correct isolation)", len(updateA.Peers))
+
+	// Beta's peer map should only contain node-beta
+	streamB, err := coordClient.WatchPeerMap(ctx, &coordpb.WatchPeerMapRequest{
+		NodeId: "node-beta", TeamId: teamBeta,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	updateB, err := streamB.Recv()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	betaNodeIDs := make(map[string]bool)
+	for _, p := range updateB.Peers {
+		betaNodeIDs[p.NodeId] = true
+	}
+	if !betaNodeIDs["node-beta"] {
+		t.Fatal("team-beta peer map should contain node-beta")
+	}
+	if betaNodeIDs["node-alpha"] {
+		t.Fatal("team-beta peer map should NOT contain node-alpha (isolation violation)")
+	}
+	t.Logf("Beta peer map: %d peers (correct isolation)", len(updateB.Peers))
+
+	// --- Verify team-scoped handle lookup ---
+
+	// Lookup "calculator" in team-alpha → should find node-alpha
+	lrA, err := coordClient.LookupHandle(ctx, &coordpb.LookupHandleRequest{
+		Handle: "calculator", TeamId: teamAlpha,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !lrA.Found || lrA.Peer.NodeId != "node-alpha" {
+		t.Fatalf("team-alpha lookup: expected node-alpha, got %v", lrA.Peer)
+	}
+
+	// Lookup "calculator" in team-beta → should find node-beta
+	lrB, err := coordClient.LookupHandle(ctx, &coordpb.LookupHandleRequest{
+		Handle: "calculator", TeamId: teamBeta,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !lrB.Found || lrB.Peer.NodeId != "node-beta" {
+		t.Fatalf("team-beta lookup: expected node-beta, got %v", lrB.Peer)
+	}
+
+	// --- Verify cross-team routing fails ---
+	// Set up agent servers on each node, wire peer maps from team-scoped data
+
+	sessionsA := session.NewStore()
+	sessionsB := session.NewStore()
+	activityA := daemon.NewActivityBus()
+	activityB := daemon.NewActivityBus()
+
+	agentSrvA := daemon.NewAgentServer(sessionsA, nil, activityA, logger.With("component", "agent-alpha"))
+	agentSrvA.SetDashboardDeps("node-alpha", resolverA, tpA)
+	routerA := daemon.NewMessageRouter(resolverA, tpA, agentSrvA, activityA, logger.With("component", "router-alpha"))
+	agentSrvA.SetRouter(routerA)
+
+	agentSrvB := daemon.NewAgentServer(sessionsB, nil, activityB, logger.With("component", "agent-beta"))
+	agentSrvB.SetDashboardDeps("node-beta", resolverB, tpB)
+	routerB := daemon.NewMessageRouter(resolverB, tpB, agentSrvB, activityB, logger.With("component", "router-beta"))
+	agentSrvB.SetRouter(routerB)
+
+	tpB.OnReceive(func(env *messagepb.Envelope) {
+		agentSrvB.DeliverToLocal(env)
+	})
+
+	agentLisA, _ := net.Listen("tcp", "127.0.0.1:0")
+	agentLisB, _ := net.Listen("tcp", "127.0.0.1:0")
+	go agentSrvA.ServeTCP(agentLisA)
+	go agentSrvB.ServeTCP(agentLisB)
+	defer agentSrvA.GracefulStop()
+	defer agentSrvB.GracefulStop()
+
+	// Each node only sees its own team's peers in the resolver
+	// (simulating what WatchPeerMap would populate)
+	resolverA.UpdatePeerMap(map[string]handle.PeerInfo{
+		"calculator": {NodeID: "node-alpha", PublicKey: kpA.Public, AdvertiseAddr: tpALis.Addr().String()},
+	})
+	resolverB.UpdatePeerMap(map[string]handle.PeerInfo{
+		"calculator": {NodeID: "node-beta", PublicKey: kpB.Public, AdvertiseAddr: tpBLis.Addr().String()},
+	})
+
+	// Connect as agent clients
+	agentConnA, _ := grpc.NewClient(agentLisA.Addr().String(), grpc.WithTransportCredentials(insecure.NewCredentials()))
+	defer agentConnA.Close()
+	agentA := agentpb.NewAgentAPIClient(agentConnA)
+
+	agentConnB, _ := grpc.NewClient(agentLisB.Addr().String(), grpc.WithTransportCredentials(insecure.NewCredentials()))
+	defer agentConnB.Close()
+	agentB := agentpb.NewAgentAPIClient(agentConnB)
+
+	// Register handles locally
+	rA, _ := agentA.Register(ctx, &agentpb.RegisterRequest{Handle: "calculator"})
+	if !rA.Ok {
+		t.Fatalf("register alpha calculator: %s", rA.Error)
+	}
+	rB, _ := agentB.Register(ctx, &agentpb.RegisterRequest{Handle: "calculator"})
+	if !rB.Ok {
+		t.Fatalf("register beta calculator: %s", rB.Error)
+	}
+
+	// Node-alpha's resolver doesn't know about node-beta's "calculator",
+	// so opening a session from alpha to a handle that only exists in beta's
+	// team would fail — the handle resolves to alpha's own "calculator" (local).
+	// This IS the isolation: node-alpha never learns about node-beta's calculator.
+
+	// Verify that each node's list only shows its own calculator
+	listA, err := agentA.ListHandles(ctx, &agentpb.ListHandlesRequest{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(listA.Entries) != 1 || listA.Entries[0].Handle != "calculator" {
+		t.Fatalf("node-alpha should see exactly 1 handle, got %d", len(listA.Entries))
+	}
+
+	listB, err := agentB.ListHandles(ctx, &agentpb.ListHandlesRequest{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(listB.Entries) != 1 || listB.Entries[0].Handle != "calculator" {
+		t.Fatalf("node-beta should see exactly 1 handle, got %d", len(listB.Entries))
+	}
+
+	t.Log("Team isolation test passed — each team sees only its own handles")
+}

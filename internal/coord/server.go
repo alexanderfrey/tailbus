@@ -459,6 +459,110 @@ func (s *Server) AcceptTeamInvite(_ context.Context, req *pb.AcceptTeamInviteReq
 	return &pb.AcceptTeamInviteResponse{TeamId: teamID, TeamName: teamName}, nil
 }
 
+// RemoveTeamMember removes a user from a team. Only owners can remove members.
+// Owners cannot remove themselves (to prevent orphaned teams).
+func (s *Server) RemoveTeamMember(_ context.Context, req *pb.RemoveTeamMemberRequest) (*pb.RemoveTeamMemberResponse, error) {
+	claims, err := s.validateJWT(req.AuthToken)
+	if err != nil {
+		return &pb.RemoveTeamMemberResponse{Error: err.Error()}, nil
+	}
+
+	// Verify caller is an owner
+	role, err := s.store.GetUserTeamRole(req.TeamId, claims.Email)
+	if err != nil {
+		return &pb.RemoveTeamMemberResponse{Error: fmt.Sprintf("lookup role: %v", err)}, nil
+	}
+	if role != "owner" {
+		return &pb.RemoveTeamMemberResponse{Error: "only team owners can remove members"}, nil
+	}
+
+	// Owners cannot remove themselves
+	if req.Email == claims.Email {
+		return &pb.RemoveTeamMemberResponse{Error: "cannot remove yourself; transfer ownership first or delete the team"}, nil
+	}
+
+	if err := s.store.RemoveTeamMember(req.TeamId, req.Email); err != nil {
+		return &pb.RemoveTeamMemberResponse{Error: err.Error()}, nil
+	}
+
+	s.logger.Info("team member removed", "team_id", req.TeamId, "email", req.Email, "by", claims.Email)
+	return &pb.RemoveTeamMemberResponse{}, nil
+}
+
+// UpdateTeamMemberRole changes a member's role. Only owners can change roles.
+// At least one owner must remain.
+func (s *Server) UpdateTeamMemberRole(_ context.Context, req *pb.UpdateTeamMemberRoleRequest) (*pb.UpdateTeamMemberRoleResponse, error) {
+	claims, err := s.validateJWT(req.AuthToken)
+	if err != nil {
+		return &pb.UpdateTeamMemberRoleResponse{Error: err.Error()}, nil
+	}
+
+	if req.Role != "owner" && req.Role != "member" {
+		return &pb.UpdateTeamMemberRoleResponse{Error: "role must be 'owner' or 'member'"}, nil
+	}
+
+	// Verify caller is an owner
+	callerRole, err := s.store.GetUserTeamRole(req.TeamId, claims.Email)
+	if err != nil {
+		return &pb.UpdateTeamMemberRoleResponse{Error: fmt.Sprintf("lookup role: %v", err)}, nil
+	}
+	if callerRole != "owner" {
+		return &pb.UpdateTeamMemberRoleResponse{Error: "only team owners can change roles"}, nil
+	}
+
+	// Prevent demoting the last owner
+	if req.Email == claims.Email && req.Role != "owner" {
+		members, err := s.store.GetTeamMembers(req.TeamId)
+		if err != nil {
+			return &pb.UpdateTeamMemberRoleResponse{Error: fmt.Sprintf("get members: %v", err)}, nil
+		}
+		ownerCount := 0
+		for _, m := range members {
+			if m.Role == "owner" {
+				ownerCount++
+			}
+		}
+		if ownerCount <= 1 {
+			return &pb.UpdateTeamMemberRoleResponse{Error: "cannot demote the last owner; promote another member first"}, nil
+		}
+	}
+
+	if err := s.store.UpdateTeamMemberRole(req.TeamId, req.Email, req.Role); err != nil {
+		return &pb.UpdateTeamMemberRoleResponse{Error: err.Error()}, nil
+	}
+
+	s.logger.Info("team member role updated", "team_id", req.TeamId, "email", req.Email, "role", req.Role, "by", claims.Email)
+	return &pb.UpdateTeamMemberRoleResponse{}, nil
+}
+
+// DeleteTeam deletes a team and all associated data. Only owners can delete.
+func (s *Server) DeleteTeam(_ context.Context, req *pb.DeleteTeamRequest) (*pb.DeleteTeamResponse, error) {
+	claims, err := s.validateJWT(req.AuthToken)
+	if err != nil {
+		return &pb.DeleteTeamResponse{Error: err.Error()}, nil
+	}
+
+	role, err := s.store.GetUserTeamRole(req.TeamId, claims.Email)
+	if err != nil {
+		return &pb.DeleteTeamResponse{Error: fmt.Sprintf("lookup role: %v", err)}, nil
+	}
+	if role != "owner" {
+		return &pb.DeleteTeamResponse{Error: "only team owners can delete teams"}, nil
+	}
+
+	if err := s.store.DeleteTeam(req.TeamId); err != nil {
+		return &pb.DeleteTeamResponse{Error: err.Error()}, nil
+	}
+
+	// Broadcast updated peer maps since team nodes are now unscoped
+	if err := s.peerMap.ForceBroadcast(); err != nil {
+		s.logger.Error("failed to broadcast after team deletion", "error", err)
+	}
+
+	s.logger.Info("team deleted", "team_id", req.TeamId, "by", claims.Email)
+	return &pb.DeleteTeamResponse{}, nil
+}
+
 // generateID generates a random hex string of the given byte length.
 func generateID(byteLen int) string {
 	b := make([]byte, byteLen)

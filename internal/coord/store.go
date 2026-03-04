@@ -580,6 +580,47 @@ func (s *Store) AddTeamMember(teamID, email, role string) error {
 	return err
 }
 
+// RemoveTeamMember removes a user from a team.
+func (s *Store) RemoveTeamMember(teamID, email string) error {
+	res, err := s.db.Exec("DELETE FROM team_members WHERE team_id = ? AND email = ?", teamID, email)
+	if err != nil {
+		return err
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return fmt.Errorf("user %q is not a member of this team", email)
+	}
+	return nil
+}
+
+// UpdateTeamMemberRole changes a member's role within a team.
+func (s *Store) UpdateTeamMemberRole(teamID, email, role string) error {
+	res, err := s.db.Exec("UPDATE team_members SET role = ? WHERE team_id = ? AND email = ?", role, teamID, email)
+	if err != nil {
+		return err
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return fmt.Errorf("user %q is not a member of this team", email)
+	}
+	return nil
+}
+
+// DeleteTeam removes a team and all its members/invites (via CASCADE).
+func (s *Store) DeleteTeam(teamID string) error {
+	res, err := s.db.Exec("DELETE FROM teams WHERE team_id = ?", teamID)
+	if err != nil {
+		return err
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return fmt.Errorf("team not found")
+	}
+	// Clear team_id from nodes that belonged to this team
+	_, err = s.db.Exec("UPDATE nodes SET team_id = '' WHERE team_id = ?", teamID)
+	return err
+}
+
 // GetTeamMembers returns all members of a team.
 func (s *Store) GetTeamMembers(teamID string) ([]struct {
 	Email string

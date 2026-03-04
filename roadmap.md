@@ -2,7 +2,7 @@
 
 ## Where we are today
 
-Working MVP with real security, NAT traversal, persistence, and MCP integration: coord server + node daemons + P2P gRPC transport + relay server + CLI + TUI dashboard + Prometheus metrics + distributed tracing + stdio bridge + MCP gateway + Docker Compose. **Phase 1 hardening complete:** mTLS on all connections (P2P, relay, and coord), per-connection handle ownership on the Unix socket, Unix socket token auth, coord admission control (pre-auth tokens + OAuth/JWT), per-session sequence numbers, and delivery ACKs with retry. **Phase 2 reliability:** message persistence via bbolt — sessions and pending messages survive daemon restarts. **Phase 3 NAT traversal:** DERP-style relay server enables message delivery across NAT boundaries. **Phase 4 SDKs:** Python SDK (async/sync, zero deps) wrapping the stdio bridge. **Phase 5 protocol bridges:** MCP gateway exposes handles as MCP tools — any MCP-compatible LLM can use tailbus agents. **Phase 9 observability:** Web chat UI embedded in daemon binary for browser-based agent interaction. **Phase 10 deployment:** Docker Compose with full mesh + web UI + LLM agents; multi-agent LLM collaboration example (researcher/critic/writer pipeline); cross-network deployment templates for multi-machine meshes. **OAuth login:** Device Authorization Grant (RFC 8628) for Tailscale-style `install → login → connected` UX; Google OIDC; JWT tokens with auto-refresh; `tailbus login/logout/status` CLI commands. **Cloud deployment:** `tailbus-coord` on Fly.io at `coord.tailbus.co` with embedded relay on port 7443; any machine can join with `tailbus login && tailbusd` and gets NAT traversal for free.
+Working MVP with real security, NAT traversal, persistence, and MCP integration: coord server + node daemons + P2P gRPC transport + relay server + CLI + TUI dashboard + Prometheus metrics + distributed tracing + stdio bridge + MCP gateway + Docker Compose. **Phase 1 hardening complete:** mTLS on all connections (P2P, relay, and coord), per-connection handle ownership on the Unix socket, Unix socket token auth, coord admission control (pre-auth tokens + OAuth/JWT), per-session sequence numbers, and delivery ACKs with retry. **Phase 2 reliability:** message persistence via bbolt — sessions and pending messages survive daemon restarts. **Phase 3 NAT traversal:** DERP-style relay server enables message delivery across NAT boundaries. **Phase 4 SDKs:** Python SDK (async/sync, zero deps) wrapping the stdio bridge. **Phase 5 protocol bridges:** MCP gateway exposes handles as MCP tools — any MCP-compatible LLM can use tailbus agents. **Phase 8 teams:** Team-based isolation — teams as the core multi-tenancy unit; team-scoped peer maps, handle lookup, and registration; invite codes for onboarding; CLI team management commands. **Phase 9 observability:** Web chat UI embedded in daemon binary for browser-based agent interaction. **Phase 10 deployment:** Docker Compose with full mesh + web UI + LLM agents; multi-agent LLM collaboration example (researcher/critic/writer pipeline); cross-network deployment templates for multi-machine meshes. **OAuth login:** Device Authorization Grant (RFC 8628) for Tailscale-style `install → login → connected` UX; Google OIDC; JWT tokens with auto-refresh; `tailbus login/logout/status` CLI commands. **Cloud deployment:** `tailbus-coord` on Fly.io at `coord.tailbus.co` with embedded relay on port 7443; any machine can join with `tailbus login && tailbusd` and gets NAT traversal for free.
 
 **What works:**
 - Agents register handles, open sessions, exchange messages, resolve conversations
@@ -278,24 +278,54 @@ Working MVP with real security, NAT traversal, persistence, and MCP integration:
 
 ---
 
-## Pillar 8: Multi-Tenancy & Federation
+## Pillar 8: Teams, Multi-Tenancy & Federation
 
-*The `name@domain` format is already in the handle parser. Wire it up.*
+*Tailscale's tailnet is the killer abstraction — a private network you manage like a team. Tailbus needs the same: a team owns a mesh, members share agents, policies scope to teams.*
 
-### P8.1 — Domain isolation
+### ~~P8.1 — Teams & user management~~ ✓ DONE
+- Teams as the core isolation unit: `teams`, `team_members`, `team_invites` tables in SQLite
+- `team_id` on nodes; coord validates team membership on registration
+- Handles scoped to team — two teams can each have a `calculator` handle without collision (composite PK on handles table)
+- Peer map filtering is the single enforcement point: `BuildForTeam()` returns only team peers + relays; nodes in different teams never learn about each other
+- JWT claims include `team_id`; preserved through token refresh
+- Default behavior: `team_id=""` everywhere = personal mode = current behavior unchanged (full backward compat)
+- Team management RPCs: `CreateTeam`, `ListTeams`, `GetTeamMembers`, `RemoveTeamMember`, `UpdateTeamMemberRole`, `DeleteTeam`
+- CLI: `tailbus team {create, list, members, invite, join, switch, remove, role, delete}`
+- Owner safety: can't remove self, can't demote last owner, can't create invites unless owner
+
+### ~~P8.2 — Team invitations & onboarding~~ ✓ DONE
+- Invite codes: 8-char hex strings with configurable max uses and TTL (default 7 days)
+- `CreateTeamInvite` RPC (owner only) + `AcceptTeamInvite` RPC (any authenticated user)
+- Codes shared out-of-band (like `tailscale up --authkey`) — no email service needed
+- `tailbus team invite <name> [--uses N] [--ttl 7d]` generates code, `tailbus team join <code>` accepts
+- Invite consumption is atomic (checks expiry + use count in transaction)
+- `tailbus team switch <name>` writes active team to credentials; daemon reads on startup
+
+### P8.3 — Team-scoped policies
+- **Problem:** ACLs (P7.1–P7.2) need a team boundary. Without it, policies are global and unmanageable at scale.
+- Policies are per-team — each team has its own ACL file/config
+- Team admins manage policies; members can't modify them
+- Default policy per team: `allow * -> *` (open within team, deny cross-team)
+- Cross-team messaging requires explicit bilateral policy (`allow team-a:analytics -> team-b:dashboard`)
+- Handle visibility: by default handles are only visible to members of the owning team
+- Shared handles: explicit opt-in to make a handle visible to other teams or public
+
+### P8.4 — Domain isolation
 - Coord server scoped to a domain (like a Tailscale tailnet)
 - Handles are unique within a domain
 - Config: `domain = "acme.com"` in coord config
+- Teams exist within a domain; domain is the trust boundary
 
-### P8.2 — Federation (cross-domain)
+### P8.5 — Federation (cross-domain)
 - DNS SRV records for coord server discovery: `_tailbus._tcp.acme.com`
 - When routing to `agent@otherdomain.com`, look up their coord via DNS
 - Cross-domain trust policies (which orgs can message which)
 - Proxy through relay or establish direct P2P with foreign node
 
-### P8.3 — Org admin API
-- REST API on coord for managing nodes, handles, policies
-- Token-based auth for automation
+### P8.6 — Admin API & console
+- REST API on coord for managing teams, nodes, handles, policies, users
+- Token-based auth for automation (service accounts, CI/CD)
+- Team dashboard: member list, node status, handle registry, policy editor
 - Foundation for a web admin console
 
 ---
@@ -480,14 +510,18 @@ All four items complete: governance files, CI pipeline, PyPI publish, CHANGELOG.
 | **P3.2 — Direct connection probing** | Relay works but is slower; upgrade to direct when possible. | Medium |
 | **P7.1 — Handle-level ACLs** | When >1 team uses the mesh, unrestricted messaging is a non-starter. | Medium |
 
-### Later — Enterprise & Scale
+### Later — Teams & Enterprise
 
 | Item | Why | Effort |
 |------|-----|--------|
+| ~~P8.1 — Teams & user management~~ | ✓ Done | — |
+| ~~P8.2 — Team invitations~~ | ✓ Done | — |
 | **P7.1-P7.2 — ACLs** | Required for multi-team deployments. | Large |
-| **P8.1 — Domain isolation** | Required for multi-tenant SaaS. | Large |
+| **P8.3 — Team-scoped policies** | ACLs need team boundaries to be manageable. | Medium |
 | **P6.1-P6.3 — Rich semantics** | Multi-party sessions, delegation, error envelopes. | Large |
-| **P8.2 — Federation** | Massive scope; get single-domain right first. | Very large |
+| **P8.6 — Admin API & console** | REST API for team/node/policy management + web dashboard. | Medium |
+| **P8.4 — Domain isolation** | Required for multi-tenant SaaS. | Large |
+| **P8.5 — Federation** | Massive scope; get single-domain right first. | Very large |
 | **P11.9 — Community channels** | Discord/Discussions, blog, showcase. Growth lever after core is solid. | Small |
 | **P10.2-P10.4 — Systemd, K8s, Helm** | Important but not differentiating. | Medium |
 
@@ -510,6 +544,8 @@ All four items complete: governance files, CI pipeline, PyPI publish, CHANGELOG.
 | ~~P11.2 — CI pipeline~~ | ✓ ci.yml (lint + test-go + test-python), Dependabot, make lint |
 | ~~P11.3 — PyPI publish~~ | ✓ Trusted publishing in release.yml, SDK README |
 | ~~P11.7 — CHANGELOG~~ | ✓ Keep a Changelog format, backfilled v0.1.0 and v0.2.0 |
+| ~~P8.1 — Teams & user management~~ | ✓ Team-scoped peer maps, handles, registration; JWT team claims |
+| ~~P8.2 — Team invitations~~ | ✓ Invite codes with TTL/max-uses; CLI team management |
 
 ---
 

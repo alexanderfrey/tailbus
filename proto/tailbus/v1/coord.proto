@@ -16,6 +16,9 @@ service CoordinationAPI {
   rpc GetTeamMembers(GetTeamMembersRequest) returns (GetTeamMembersResponse);
   rpc CreateTeamInvite(CreateTeamInviteRequest) returns (CreateTeamInviteResponse);
   rpc AcceptTeamInvite(AcceptTeamInviteRequest) returns (AcceptTeamInviteResponse);
+  rpc RemoveTeamMember(RemoveTeamMemberRequest) returns (RemoveTeamMemberResponse);
+  rpc UpdateTeamMemberRole(UpdateTeamMemberRoleRequest) returns (UpdateTeamMemberRoleResponse);
+  rpc DeleteTeam(DeleteTeamRequest) returns (DeleteTeamResponse);
 }
 
 message RegisterNodeRequest {
@@ -152,4 +155,34 @@ message AcceptTeamInviteResponse {
   string team_id = 1;
   string team_name = 2;
   string error = 3;
+}
+
+message RemoveTeamMemberRequest {
+  string auth_token = 1;
+  string team_id = 2;
+  string email = 3;
+}
+
+message RemoveTeamMemberResponse {
+  string error = 1;
+}
+
+message UpdateTeamMemberRoleRequest {
+  string auth_token = 1;
+  string team_id = 2;
+  string email = 3;
+  string role = 4;
+}
+
+message UpdateTeamMemberRoleResponse {
+  string error = 1;
+}
+
+message DeleteTeamRequest {
+  string auth_token = 1;
+  string team_id = 2;
+}
+
+message DeleteTeamResponse {
+  string error = 1;
 }

@@ -704,3 +704,129 @@ func TestTeamScopedLookup(t *testing.T) {
 		t.Fatalf("expected node-b for team-b lookup, got %v", lr.Peer)
 	}
 }
+
+func TestTeamRemoveMember(t *testing.T) {
+	_, client, issuer, cleanup := testServerWithJWT(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	aliceToken, _, _ := issuer.Issue("alice@example.com")
+	bobToken, _, _ := issuer.Issue("bob@example.com")
+
+	// Alice creates team, invites Bob
+	cr, _ := client.CreateTeam(ctx, &pb.CreateTeamRequest{AuthToken: aliceToken, Name: "acme"})
+	inv, _ := client.CreateTeamInvite(ctx, &pb.CreateTeamInviteRequest{
+		AuthToken: aliceToken, TeamId: cr.TeamId, MaxUses: 1, TtlSeconds: 3600,
+	})
+	client.AcceptTeamInvite(ctx, &pb.AcceptTeamInviteRequest{AuthToken: bobToken, Code: inv.Code})
+
+	// Bob (member) can't remove Alice
+	resp, _ := client.RemoveTeamMember(ctx, &pb.RemoveTeamMemberRequest{
+		AuthToken: bobToken, TeamId: cr.TeamId, Email: "alice@example.com",
+	})
+	if resp.Error == "" {
+		t.Fatal("member should not be able to remove others")
+	}
+
+	// Alice can't remove herself (last owner)
+	resp, _ = client.RemoveTeamMember(ctx, &pb.RemoveTeamMemberRequest{
+		AuthToken: aliceToken, TeamId: cr.TeamId, Email: "alice@example.com",
+	})
+	if resp.Error == "" {
+		t.Fatal("owner should not be able to remove themselves")
+	}
+
+	// Alice removes Bob
+	resp, _ = client.RemoveTeamMember(ctx, &pb.RemoveTeamMemberRequest{
+		AuthToken: aliceToken, TeamId: cr.TeamId, Email: "bob@example.com",
+	})
+	if resp.Error != "" {
+		t.Fatalf("remove bob failed: %s", resp.Error)
+	}
+
+	// Verify Bob is gone
+	mem, _ := client.GetTeamMembers(ctx, &pb.GetTeamMembersRequest{AuthToken: aliceToken, TeamId: cr.TeamId})
+	if len(mem.Members) != 1 {
+		t.Fatalf("expected 1 member after removal, got %d", len(mem.Members))
+	}
+}
+
+func TestTeamUpdateRole(t *testing.T) {
+	_, client, issuer, cleanup := testServerWithJWT(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	aliceToken, _, _ := issuer.Issue("alice@example.com")
+	bobToken, _, _ := issuer.Issue("bob@example.com")
+
+	cr, _ := client.CreateTeam(ctx, &pb.CreateTeamRequest{AuthToken: aliceToken, Name: "acme"})
+	inv, _ := client.CreateTeamInvite(ctx, &pb.CreateTeamInviteRequest{
+		AuthToken: aliceToken, TeamId: cr.TeamId, MaxUses: 1, TtlSeconds: 3600,
+	})
+	client.AcceptTeamInvite(ctx, &pb.AcceptTeamInviteRequest{AuthToken: bobToken, Code: inv.Code})
+
+	// Promote Bob to owner
+	resp, _ := client.UpdateTeamMemberRole(ctx, &pb.UpdateTeamMemberRoleRequest{
+		AuthToken: aliceToken, TeamId: cr.TeamId, Email: "bob@example.com", Role: "owner",
+	})
+	if resp.Error != "" {
+		t.Fatalf("promote bob failed: %s", resp.Error)
+	}
+
+	// Invalid role should fail
+	resp, _ = client.UpdateTeamMemberRole(ctx, &pb.UpdateTeamMemberRoleRequest{
+		AuthToken: aliceToken, TeamId: cr.TeamId, Email: "bob@example.com", Role: "admin",
+	})
+	if resp.Error == "" {
+		t.Fatal("invalid role should be rejected")
+	}
+
+	// Alice can now demote herself (Bob is also owner)
+	resp, _ = client.UpdateTeamMemberRole(ctx, &pb.UpdateTeamMemberRoleRequest{
+		AuthToken: aliceToken, TeamId: cr.TeamId, Email: "alice@example.com", Role: "member",
+	})
+	if resp.Error != "" {
+		t.Fatalf("demote alice failed (bob is also owner): %s", resp.Error)
+	}
+
+	// Bob is now sole owner — cannot demote self
+	resp, _ = client.UpdateTeamMemberRole(ctx, &pb.UpdateTeamMemberRoleRequest{
+		AuthToken: bobToken, TeamId: cr.TeamId, Email: "bob@example.com", Role: "member",
+	})
+	if resp.Error == "" {
+		t.Fatal("last owner should not be able to demote themselves")
+	}
+}
+
+func TestTeamDelete(t *testing.T) {
+	_, client, issuer, cleanup := testServerWithJWT(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	aliceToken, _, _ := issuer.Issue("alice@example.com")
+	bobToken, _, _ := issuer.Issue("bob@example.com")
+
+	cr, _ := client.CreateTeam(ctx, &pb.CreateTeamRequest{AuthToken: aliceToken, Name: "acme"})
+	inv, _ := client.CreateTeamInvite(ctx, &pb.CreateTeamInviteRequest{
+		AuthToken: aliceToken, TeamId: cr.TeamId, MaxUses: 1, TtlSeconds: 3600,
+	})
+	client.AcceptTeamInvite(ctx, &pb.AcceptTeamInviteRequest{AuthToken: bobToken, Code: inv.Code})
+
+	// Bob (member) can't delete
+	resp, _ := client.DeleteTeam(ctx, &pb.DeleteTeamRequest{AuthToken: bobToken, TeamId: cr.TeamId})
+	if resp.Error == "" {
+		t.Fatal("member should not be able to delete team")
+	}
+
+	// Alice (owner) deletes
+	resp, _ = client.DeleteTeam(ctx, &pb.DeleteTeamRequest{AuthToken: aliceToken, TeamId: cr.TeamId})
+	if resp.Error != "" {
+		t.Fatalf("delete team failed: %s", resp.Error)
+	}
+
+	// Verify team is gone
+	list, _ := client.ListTeams(ctx, &pb.ListTeamsRequest{AuthToken: aliceToken})
+	if len(list.Teams) != 0 {
+		t.Fatalf("expected 0 teams after deletion, got %d", len(list.Teams))
+	}
+}
