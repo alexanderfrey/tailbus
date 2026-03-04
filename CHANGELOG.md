@@ -6,6 +6,13 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [v0.3.5] — 2026-03-04
+
+### Added
+- Auto-start tailbusd via user-level services — systemd on Linux, launchd on macOS; no sudo required
+- Reference service files in `init/` (systemd unit, macOS LaunchAgent plist)
+- Install script upgrade path: restarts service automatically on re-install
+
 ## [v0.3.0] — 2026-03-04
 
 ### Added
@@ -53,7 +60,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 - Real-time TUI dashboard
 - Release pipeline and install script
 
-[Unreleased]: https://github.com/alexanderfrey/tailbus/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/alexanderfrey/tailbus/compare/v0.3.5...HEAD
+[v0.3.5]: https://github.com/alexanderfrey/tailbus/compare/v0.3.0...v0.3.5
 [v0.3.0]: https://github.com/alexanderfrey/tailbus/compare/v0.2.0...v0.3.0
 [v0.2.0]: https://github.com/alexanderfrey/tailbus/compare/v0.1.0...v0.2.0
 [v0.1.0]: https://github.com/alexanderfrey/tailbus/releases/tag/v0.1.0
