@@ -171,7 +171,6 @@ func (s *OAuthServer) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /oauth/callback", s.handleCallback)
 	mux.HandleFunc("POST /oauth/refresh", s.handleRefresh)
 	mux.HandleFunc("GET /oauth/login", s.handleBrowserLogin)
-	mux.HandleFunc("GET /oauth/callback/web", s.handleBrowserCallback)
 }
 
 // handleDeviceCode implements POST /oauth/device/code — starts the device flow.
@@ -323,6 +322,7 @@ func (s *OAuthServer) handleVerifySubmit(w http.ResponseWriter, r *http.Request)
 }
 
 // handleCallback handles GET /oauth/callback — Google redirects here after consent.
+// Serves both device flow and browser flow by checking which state map matches.
 func (s *OAuthServer) handleCallback(w http.ResponseWriter, r *http.Request) {
 	code := r.URL.Query().Get("code")
 	state := r.URL.Query().Get("state")
@@ -332,58 +332,41 @@ func (s *OAuthServer) handleCallback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Find the device code with this state
+	// Check if this is a browser flow state
 	s.mu.Lock()
-	var foundDC *deviceCode
-	for _, dc := range s.codes {
-		if dc.OAuthState == state && !dc.Completed {
-			foundDC = dc
-			break
-		}
+	bs, isBrowser := s.browserStates[state]
+	if isBrowser {
+		delete(s.browserStates, state)
 	}
 	s.mu.Unlock()
 
-	if foundDC == nil {
-		http.Error(w, "invalid or expired session", http.StatusBadRequest)
+	if isBrowser && time.Now().After(bs.ExpiresAt) {
+		http.Error(w, "session expired", http.StatusBadRequest)
 		return
 	}
 
-	// Exchange the authorization code for tokens with Google
-	var email string
-	for _, p := range s.providers {
-		tok, err := p.config.Exchange(r.Context(), code)
-		if err != nil {
-			s.logger.Error("OAuth token exchange failed", "error", err)
-			http.Error(w, "authentication failed", http.StatusInternalServerError)
-			return
+	// If not browser flow, check device flow
+	var foundDC *deviceCode
+	if !isBrowser {
+		s.mu.Lock()
+		for _, dc := range s.codes {
+			if dc.OAuthState == state && !dc.Completed {
+				foundDC = dc
+				break
+			}
 		}
+		s.mu.Unlock()
 
-		rawIDToken, ok := tok.Extra("id_token").(string)
-		if !ok {
-			http.Error(w, "no id_token in response", http.StatusInternalServerError)
+		if foundDC == nil {
+			http.Error(w, "invalid or expired session", http.StatusBadRequest)
 			return
 		}
-
-		idToken, err := p.verifier.Verify(r.Context(), rawIDToken)
-		if err != nil {
-			s.logger.Error("ID token verification failed", "error", err)
-			http.Error(w, "token verification failed", http.StatusInternalServerError)
-			return
-		}
-
-		var claims struct {
-			Email string `json:"email"`
-		}
-		if err := idToken.Claims(&claims); err != nil {
-			http.Error(w, "failed to parse claims", http.StatusInternalServerError)
-			return
-		}
-		email = claims.Email
-		break
 	}
 
+	// Exchange the authorization code for tokens with Google
+	email := s.exchangeCodeForEmail(r, code)
 	if email == "" {
-		http.Error(w, "could not determine email", http.StatusInternalServerError)
+		http.Error(w, "authentication failed", http.StatusInternalServerError)
 		return
 	}
 
@@ -395,7 +378,16 @@ func (s *OAuthServer) handleCallback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Mark device code as completed
+	if isBrowser {
+		// Browser flow: redirect to web app with tokens in fragment
+		s.logger.Info("browser login completed", "email", email)
+		redirectURL := fmt.Sprintf("%s/dashboard#access_token=%s&refresh_token=%s&email=%s",
+			s.webAppURL, accessToken, refreshToken, email)
+		http.Redirect(w, r, redirectURL, http.StatusFound)
+		return
+	}
+
+	// Device flow: mark device code as completed
 	s.mu.Lock()
 	foundDC.Email = email
 	foundDC.AccessToken = accessToken
@@ -404,9 +396,40 @@ func (s *OAuthServer) handleCallback(w http.ResponseWriter, r *http.Request) {
 	s.mu.Unlock()
 
 	s.logger.Info("device code completed", "email", email)
-
-	// Redirect to success page
 	http.Redirect(w, r, s.externalURL+"/oauth/verify?success=true", http.StatusFound)
+}
+
+// exchangeCodeForEmail exchanges a Google auth code for an email address.
+func (s *OAuthServer) exchangeCodeForEmail(r *http.Request, code string) string {
+	for _, p := range s.providers {
+		tok, err := p.config.Exchange(r.Context(), code)
+		if err != nil {
+			s.logger.Error("OAuth token exchange failed", "error", err)
+			return ""
+		}
+
+		rawIDToken, ok := tok.Extra("id_token").(string)
+		if !ok {
+			s.logger.Error("no id_token in OAuth response")
+			return ""
+		}
+
+		idToken, err := p.verifier.Verify(r.Context(), rawIDToken)
+		if err != nil {
+			s.logger.Error("ID token verification failed", "error", err)
+			return ""
+		}
+
+		var claims struct {
+			Email string `json:"email"`
+		}
+		if err := idToken.Claims(&claims); err != nil {
+			s.logger.Error("failed to parse ID token claims", "error", err)
+			return ""
+		}
+		return claims.Email
+	}
+	return ""
 }
 
 // handleRefresh handles POST /oauth/refresh — refresh an access token.
@@ -456,97 +479,14 @@ func (s *OAuthServer) handleBrowserLogin(w http.ResponseWriter, r *http.Request)
 	}
 	s.mu.Unlock()
 
-	// Find the first provider and build auth URL with web callback
+	// Find the first provider and build auth URL (reuses existing /oauth/callback)
 	for _, p := range s.providers {
-		// Use a separate redirect URI for browser flow
-		webCfg := p.config
-		webCfg.RedirectURL = s.externalURL + "/oauth/callback/web"
-		authURL := webCfg.AuthCodeURL(state, oauth2.AccessTypeOffline)
+		authURL := p.config.AuthCodeURL(state, oauth2.AccessTypeOffline)
 		http.Redirect(w, r, authURL, http.StatusFound)
 		return
 	}
 
 	http.Error(w, "no OAuth provider configured", http.StatusInternalServerError)
-}
-
-// handleBrowserCallback handles Google redirect for browser OAuth flow.
-func (s *OAuthServer) handleBrowserCallback(w http.ResponseWriter, r *http.Request) {
-	code := r.URL.Query().Get("code")
-	state := r.URL.Query().Get("state")
-	if code == "" || state == "" {
-		http.Error(w, "missing code or state parameter", http.StatusBadRequest)
-		return
-	}
-
-	// Verify state
-	s.mu.Lock()
-	bs, ok := s.browserStates[state]
-	if ok {
-		delete(s.browserStates, state)
-	}
-	s.mu.Unlock()
-
-	if !ok || time.Now().After(bs.ExpiresAt) {
-		http.Error(w, "invalid or expired session", http.StatusBadRequest)
-		return
-	}
-
-	// Exchange code for ID token
-	var email string
-	for _, p := range s.providers {
-		webCfg := p.config
-		webCfg.RedirectURL = s.externalURL + "/oauth/callback/web"
-
-		tok, err := webCfg.Exchange(r.Context(), code)
-		if err != nil {
-			s.logger.Error("browser OAuth token exchange failed", "error", err)
-			http.Error(w, "authentication failed", http.StatusInternalServerError)
-			return
-		}
-
-		rawIDToken, ok := tok.Extra("id_token").(string)
-		if !ok {
-			http.Error(w, "no id_token in response", http.StatusInternalServerError)
-			return
-		}
-
-		idToken, err := p.verifier.Verify(r.Context(), rawIDToken)
-		if err != nil {
-			s.logger.Error("browser ID token verification failed", "error", err)
-			http.Error(w, "token verification failed", http.StatusInternalServerError)
-			return
-		}
-
-		var claims struct {
-			Email string `json:"email"`
-		}
-		if err := idToken.Claims(&claims); err != nil {
-			http.Error(w, "failed to parse claims", http.StatusInternalServerError)
-			return
-		}
-		email = claims.Email
-		break
-	}
-
-	if email == "" {
-		http.Error(w, "could not determine email", http.StatusInternalServerError)
-		return
-	}
-
-	// Issue JWT pair
-	accessToken, refreshToken, err := s.issuer.Issue(email)
-	if err != nil {
-		s.logger.Error("failed to issue JWT for browser login", "error", err)
-		http.Error(w, "failed to issue tokens", http.StatusInternalServerError)
-		return
-	}
-
-	s.logger.Info("browser login completed", "email", email)
-
-	// Redirect to web app with tokens in fragment (never sent to server)
-	redirectURL := fmt.Sprintf("%s/dashboard#access_token=%s&refresh_token=%s&email=%s",
-		s.webAppURL, accessToken, refreshToken, email)
-	http.Redirect(w, r, redirectURL, http.StatusFound)
 }
 
 // Helper functions
