@@ -46,24 +46,13 @@ echo "Extracting..."
 tar -xzf "${TMPDIR}/${ARCHIVE}" -C "$TMPDIR"
 
 # Determine install directory
-INSTALL_DIR="/usr/local/bin"
-NEED_SUDO=""
-if [ ! -w "$INSTALL_DIR" ]; then
-  if command -v sudo >/dev/null 2>&1; then
-    NEED_SUDO="sudo"
-    echo "Installing to ${INSTALL_DIR} (requires sudo)..."
-  else
-    INSTALL_DIR="${HOME}/.local/bin"
-    mkdir -p "$INSTALL_DIR"
-    echo "Installing to ${INSTALL_DIR}..."
-  fi
-else
-  echo "Installing to ${INSTALL_DIR}..."
-fi
+INSTALL_DIR="${HOME}/.local/bin"
+mkdir -p "$INSTALL_DIR"
+echo "Installing to ${INSTALL_DIR}..."
 
 for bin in tailbus-coord tailbusd tailbus; do
   if [ -f "${TMPDIR}/${bin}" ]; then
-    $NEED_SUDO install -m 755 "${TMPDIR}/${bin}" "${INSTALL_DIR}/${bin}"
+    install -m 755 "${TMPDIR}/${bin}" "${INSTALL_DIR}/${bin}"
   fi
 done
 
@@ -74,12 +63,37 @@ echo ""
 echo "tailbus ${VERSION} installed successfully!"
 echo ""
 
-# Check if install dir is in PATH
+# Ensure install dir is in PATH
 case ":$PATH:" in
   *":${INSTALL_DIR}:"*) ;;
-  *) echo "NOTE: ${INSTALL_DIR} is not in your PATH. Add it with:"
-     echo "  export PATH=\"${INSTALL_DIR}:\$PATH\""
-     echo "" ;;
+  *)
+    # Detect shell profile
+    PROFILE=""
+    if [ -n "$ZSH_VERSION" ] || [ "$(basename "$SHELL")" = "zsh" ]; then
+      PROFILE="${HOME}/.zshrc"
+    elif [ -f "${HOME}/.bashrc" ]; then
+      PROFILE="${HOME}/.bashrc"
+    elif [ -f "${HOME}/.bash_profile" ]; then
+      PROFILE="${HOME}/.bash_profile"
+    elif [ -f "${HOME}/.profile" ]; then
+      PROFILE="${HOME}/.profile"
+    fi
+
+    EXPORT_LINE="export PATH=\"${INSTALL_DIR}:\$PATH\""
+
+    if [ -n "$PROFILE" ]; then
+      if ! grep -qF ".local/bin" "$PROFILE" 2>/dev/null; then
+        echo "" >> "$PROFILE"
+        echo "# Added by tailbus installer" >> "$PROFILE"
+        echo "$EXPORT_LINE" >> "$PROFILE"
+        echo "Added ${INSTALL_DIR} to PATH in ${PROFILE}"
+      fi
+    fi
+
+    # Also export for current session
+    export PATH="${INSTALL_DIR}:$PATH"
+    echo ""
+    ;;
 esac
 
 echo "Get started:"
