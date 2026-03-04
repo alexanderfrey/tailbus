@@ -30,8 +30,9 @@ const (
 
 // OAuthConfig holds configuration for the OAuth device flow server.
 type OAuthConfig struct {
-	Providers []OAuthProviderConfig
+	Providers   []OAuthProviderConfig
 	ExternalURL string // e.g. "https://coord.tailbus.co" — base URL for callbacks
+	WebAppURL   string // e.g. "https://tailbus.co" — redirect target for browser OAuth
 }
 
 // OAuthProviderConfig holds OIDC provider configuration.
@@ -57,15 +58,23 @@ type deviceCode struct {
 	OAuthState   string // CSRF state for the OAuth redirect
 }
 
-// OAuthServer implements the RFC 8628 device authorization flow.
+// browserState tracks an in-flight browser OAuth login.
+type browserState struct {
+	State     string
+	ExpiresAt time.Time
+}
+
+// OAuthServer implements the RFC 8628 device authorization flow and browser OAuth.
 type OAuthServer struct {
 	issuer      *JWTIssuer
 	providers   map[string]*oauthProvider
 	externalURL string
+	webAppURL   string
 	logger      *slog.Logger
 
-	mu    sync.Mutex
-	codes map[string]*deviceCode // keyed by device_code
+	mu            sync.Mutex
+	codes         map[string]*deviceCode   // keyed by device_code
+	browserStates map[string]*browserState // keyed by state
 }
 
 type oauthProvider struct {
@@ -76,12 +85,19 @@ type oauthProvider struct {
 
 // NewOAuthServer creates a new OAuth server with the given providers.
 func NewOAuthServer(cfg *OAuthConfig, issuer *JWTIssuer, logger *slog.Logger) (*OAuthServer, error) {
+	webAppURL := strings.TrimRight(cfg.WebAppURL, "/")
+	if webAppURL == "" {
+		webAppURL = "https://tailbus.co"
+	}
+
 	s := &OAuthServer{
-		issuer:      issuer,
-		providers:   make(map[string]*oauthProvider),
-		externalURL: strings.TrimRight(cfg.ExternalURL, "/"),
-		logger:      logger,
-		codes:       make(map[string]*deviceCode),
+		issuer:        issuer,
+		providers:     make(map[string]*oauthProvider),
+		externalURL:   strings.TrimRight(cfg.ExternalURL, "/"),
+		webAppURL:     webAppURL,
+		logger:        logger,
+		codes:         make(map[string]*deviceCode),
+		browserStates: make(map[string]*browserState),
 	}
 
 	ctx := context.Background()
@@ -128,6 +144,11 @@ func (s *OAuthServer) StartCleanup(ctx context.Context) {
 						delete(s.codes, k)
 					}
 				}
+				for k, bs := range s.browserStates {
+					if now.After(bs.ExpiresAt) {
+						delete(s.browserStates, k)
+					}
+				}
 				s.mu.Unlock()
 			}
 		}
@@ -143,6 +164,8 @@ func (s *OAuthServer) Handler() http.Handler {
 	mux.HandleFunc("POST /oauth/verify", s.handleVerifySubmit)
 	mux.HandleFunc("GET /oauth/callback", s.handleCallback)
 	mux.HandleFunc("POST /oauth/refresh", s.handleRefresh)
+	mux.HandleFunc("GET /oauth/login", s.handleBrowserLogin)
+	mux.HandleFunc("GET /oauth/callback/web", s.handleBrowserCallback)
 	return mux
 }
 
@@ -411,6 +434,114 @@ func (s *OAuthServer) handleRefresh(w http.ResponseWriter, r *http.Request) {
 		"expires_in":    int(accessTokenDuration.Seconds()),
 		"email":         email,
 	})
+}
+
+// handleBrowserLogin starts the browser OAuth redirect flow.
+func (s *OAuthServer) handleBrowserLogin(w http.ResponseWriter, r *http.Request) {
+	state, err := randomHex(16)
+	if err != nil {
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+
+	s.mu.Lock()
+	s.browserStates[state] = &browserState{
+		State:     state,
+		ExpiresAt: time.Now().Add(15 * time.Minute),
+	}
+	s.mu.Unlock()
+
+	// Find the first provider and build auth URL with web callback
+	for _, p := range s.providers {
+		// Use a separate redirect URI for browser flow
+		webCfg := p.config
+		webCfg.RedirectURL = s.externalURL + "/oauth/callback/web"
+		authURL := webCfg.AuthCodeURL(state, oauth2.AccessTypeOffline)
+		http.Redirect(w, r, authURL, http.StatusFound)
+		return
+	}
+
+	http.Error(w, "no OAuth provider configured", http.StatusInternalServerError)
+}
+
+// handleBrowserCallback handles Google redirect for browser OAuth flow.
+func (s *OAuthServer) handleBrowserCallback(w http.ResponseWriter, r *http.Request) {
+	code := r.URL.Query().Get("code")
+	state := r.URL.Query().Get("state")
+	if code == "" || state == "" {
+		http.Error(w, "missing code or state parameter", http.StatusBadRequest)
+		return
+	}
+
+	// Verify state
+	s.mu.Lock()
+	bs, ok := s.browserStates[state]
+	if ok {
+		delete(s.browserStates, state)
+	}
+	s.mu.Unlock()
+
+	if !ok || time.Now().After(bs.ExpiresAt) {
+		http.Error(w, "invalid or expired session", http.StatusBadRequest)
+		return
+	}
+
+	// Exchange code for ID token
+	var email string
+	for _, p := range s.providers {
+		webCfg := p.config
+		webCfg.RedirectURL = s.externalURL + "/oauth/callback/web"
+
+		tok, err := webCfg.Exchange(r.Context(), code)
+		if err != nil {
+			s.logger.Error("browser OAuth token exchange failed", "error", err)
+			http.Error(w, "authentication failed", http.StatusInternalServerError)
+			return
+		}
+
+		rawIDToken, ok := tok.Extra("id_token").(string)
+		if !ok {
+			http.Error(w, "no id_token in response", http.StatusInternalServerError)
+			return
+		}
+
+		idToken, err := p.verifier.Verify(r.Context(), rawIDToken)
+		if err != nil {
+			s.logger.Error("browser ID token verification failed", "error", err)
+			http.Error(w, "token verification failed", http.StatusInternalServerError)
+			return
+		}
+
+		var claims struct {
+			Email string `json:"email"`
+		}
+		if err := idToken.Claims(&claims); err != nil {
+			http.Error(w, "failed to parse claims", http.StatusInternalServerError)
+			return
+		}
+		email = claims.Email
+		break
+	}
+
+	if email == "" {
+		http.Error(w, "could not determine email", http.StatusInternalServerError)
+		return
+	}
+
+	// Issue JWT pair
+	accessToken, refreshToken, err := s.issuer.Issue(email)
+	if err != nil {
+		s.logger.Error("failed to issue JWT for browser login", "error", err)
+		http.Error(w, "failed to issue tokens", http.StatusInternalServerError)
+		return
+	}
+
+	s.logger.Info("browser login completed", "email", email)
+
+	// Redirect to web app with tokens in fragment (never sent to server)
+	redirectURL := fmt.Sprintf("%s/dashboard#access_token=%s&refresh_token=%s&email=%s",
+		s.webAppURL, accessToken, refreshToken, email)
+	http.Redirect(w, r, redirectURL, http.StatusFound)
 }
 
 // Helper functions

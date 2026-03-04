@@ -2,7 +2,7 @@
 
 ## Where we are today
 
-Working MVP with real security, NAT traversal, persistence, and MCP integration: coord server + node daemons + P2P gRPC transport + relay server + CLI + TUI dashboard + Prometheus metrics + distributed tracing + stdio bridge + MCP gateway + Docker Compose. **Phase 1 hardening complete:** mTLS on all connections (P2P, relay, and coord), per-connection handle ownership on the Unix socket, Unix socket token auth, coord admission control (pre-auth tokens + OAuth/JWT), per-session sequence numbers, and delivery ACKs with retry. **Phase 2 reliability:** message persistence via bbolt — sessions and pending messages survive daemon restarts. **Phase 3 NAT traversal:** DERP-style relay server enables message delivery across NAT boundaries. **Phase 4 SDKs:** Python SDK (async/sync, zero deps) wrapping the stdio bridge. **Phase 5 protocol bridges:** MCP gateway exposes handles as MCP tools — any MCP-compatible LLM can use tailbus agents. **Phase 8 teams:** Team-based isolation — teams as the core multi-tenancy unit; team-scoped peer maps, handle lookup, and registration; invite codes for onboarding; CLI team management commands. **Phase 9 observability:** Web chat UI embedded in daemon binary for browser-based agent interaction. **Phase 10 deployment:** Docker Compose with full mesh + web UI + LLM agents; multi-agent LLM collaboration example (researcher/critic/writer pipeline); cross-network deployment templates for multi-machine meshes. **OAuth login:** Device Authorization Grant (RFC 8628) for Tailscale-style `install → login → connected` UX; Google OIDC; JWT tokens with auto-refresh; `tailbus login/logout/status` CLI commands. **Cloud deployment:** `tailbus-coord` on Fly.io at `coord.tailbus.co` with embedded relay on port 7443; any machine can join with `tailbus login && tailbusd` and gets NAT traversal for free.
+Working MVP with real security, NAT traversal, persistence, and MCP integration: coord server + node daemons + P2P gRPC transport + relay server + CLI + TUI dashboard + Prometheus metrics + distributed tracing + stdio bridge + MCP gateway + Docker Compose. **Phase 1 hardening complete:** mTLS on all connections (P2P, relay, and coord), per-connection handle ownership on the Unix socket, Unix socket token auth, coord admission control (pre-auth tokens + OAuth/JWT), per-session sequence numbers, and delivery ACKs with retry. **Phase 2 reliability:** message persistence via bbolt — sessions and pending messages survive daemon restarts. **Phase 3 NAT traversal:** DERP-style relay server enables message delivery across NAT boundaries. **Phase 4 SDKs:** Python SDK (async/sync, zero deps) wrapping the stdio bridge. **Phase 5 protocol bridges:** MCP gateway exposes handles as MCP tools — any MCP-compatible LLM can use tailbus agents. **Phase 8 teams:** Team-based isolation — teams as the core multi-tenancy unit; team-scoped peer maps, handle lookup, and registration; invite codes for onboarding; CLI team management commands; REST API + browser OAuth + web dashboard at `tailbus.co/dashboard`. **Phase 9 observability:** Web chat UI embedded in daemon binary for browser-based agent interaction. **Phase 10 deployment:** Docker Compose with full mesh + web UI + LLM agents; multi-agent LLM collaboration example (researcher/critic/writer pipeline); cross-network deployment templates for multi-machine meshes. **OAuth login:** Device Authorization Grant (RFC 8628) for Tailscale-style `install → login → connected` UX; Google OIDC; JWT tokens with auto-refresh; `tailbus login/logout/status` CLI commands. **Cloud deployment:** `tailbus-coord` on Fly.io at `coord.tailbus.co` with embedded relay on port 7443; any machine can join with `tailbus login && tailbusd` and gets NAT traversal for free.
 
 **What works:**
 - Agents register handles, open sessions, exchange messages, resolve conversations
@@ -322,11 +322,13 @@ Working MVP with real security, NAT traversal, persistence, and MCP integration:
 - Cross-domain trust policies (which orgs can message which)
 - Proxy through relay or establish direct P2P with foreign node
 
-### P8.6 — Admin API & console
-- REST API on coord for managing teams, nodes, handles, policies, users
-- Token-based auth for automation (service accounts, CI/CD)
-- Team dashboard: member list, node status, handle registry, policy editor
-- Foundation for a web admin console
+### ~~P8.6 — Admin API & console~~ ✓ DONE
+- REST API on coord (`/api/v1/`) for teams, members, invites, nodes — JWT Bearer auth, same HTTP port as OAuth
+- Browser OAuth flow: `GET /oauth/login` → Google consent → redirect to `{webAppURL}/dashboard#tokens`
+- CORS middleware for cross-origin requests from the web app
+- Dashboard UI at `tailbus.co/dashboard`: team list, create team, team detail (members, nodes, invites), role management, delete team
+- Auth: localStorage tokens with auto-refresh on 401; Google sign-in via browser OAuth redirect
+- Config: `web_app_url` in coord TOML (default `https://tailbus.co`)
 
 ---
 
@@ -519,7 +521,7 @@ All four items complete: governance files, CI pipeline, PyPI publish, CHANGELOG.
 | **P7.1-P7.2 — ACLs** | Required for multi-team deployments. | Large |
 | **P8.3 — Team-scoped policies** | ACLs need team boundaries to be manageable. | Medium |
 | **P6.1-P6.3 — Rich semantics** | Multi-party sessions, delegation, error envelopes. | Large |
-| **P8.6 — Admin API & console** | REST API for team/node/policy management + web dashboard. | Medium |
+| ~~P8.6 — Admin API & console~~ | ✓ Done | — |
 | **P8.4 — Domain isolation** | Required for multi-tenant SaaS. | Large |
 | **P8.5 — Federation** | Massive scope; get single-domain right first. | Very large |
 | **P11.9 — Community channels** | Discord/Discussions, blog, showcase. Growth lever after core is solid. | Small |
@@ -546,6 +548,7 @@ All four items complete: governance files, CI pipeline, PyPI publish, CHANGELOG.
 | ~~P11.7 — CHANGELOG~~ | ✓ Keep a Changelog format, backfilled v0.1.0 and v0.2.0 |
 | ~~P8.1 — Teams & user management~~ | ✓ Team-scoped peer maps, handles, registration; JWT team claims |
 | ~~P8.2 — Team invitations~~ | ✓ Invite codes with TTL/max-uses; CLI team management |
+| ~~P8.6 — Admin API & console~~ | ✓ REST API, browser OAuth, web dashboard at tailbus.co/dashboard |
 
 ---
 

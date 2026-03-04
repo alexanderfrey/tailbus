@@ -22,14 +22,16 @@ import (
 type Server struct {
 	pb.UnimplementedCoordinationAPIServer
 
-	store     *Store
-	registry  *Registry
-	peerMap   *PeerMap
-	admission *Admission
-	jwtIssuer *JWTIssuer
-	oauth     *OAuthServer
-	logger    *slog.Logger
-	grpc      *grpc.Server
+	store      *Store
+	registry   *Registry
+	peerMap    *PeerMap
+	admission  *Admission
+	jwtIssuer  *JWTIssuer
+	oauth      *OAuthServer
+	rest       *RESTHandler
+	corsOrigin string
+	logger     *slog.Logger
+	grpc       *grpc.Server
 }
 
 // NewServer creates a new coordination server.
@@ -92,12 +94,34 @@ func (s *Server) SetOAuth(oauth *OAuthServer) {
 	s.oauth = oauth
 }
 
-// HTTPHandler returns an http.Handler for the OAuth routes, or nil if OAuth is not configured.
+// SetREST configures the REST API handler.
+func (s *Server) SetREST(rest *RESTHandler) {
+	s.rest = rest
+}
+
+// SetCORSOrigin configures the CORS allowed origin.
+func (s *Server) SetCORSOrigin(origin string) {
+	s.corsOrigin = origin
+}
+
+// HTTPHandler returns an http.Handler for the OAuth and REST routes, or nil if neither is configured.
 func (s *Server) HTTPHandler() http.Handler {
-	if s.oauth == nil {
+	if s.oauth == nil && s.rest == nil {
 		return nil
 	}
-	return s.oauth.Handler()
+
+	mux := http.NewServeMux()
+	if s.oauth != nil {
+		mux.Handle("/oauth/", s.oauth.Handler())
+	}
+	if s.rest != nil {
+		mux.Handle("/api/", s.rest.Handler())
+	}
+
+	if s.corsOrigin != "" {
+		return CORSMiddleware(s.corsOrigin, mux)
+	}
+	return mux
 }
 
 // Serve starts the gRPC server on the given listener.

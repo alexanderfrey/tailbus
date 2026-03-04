@@ -126,6 +126,7 @@ Every registered handle becomes a callable tool. If your agent declares commands
 - **Message persistence** — bbolt-backed store; sessions and pending messages survive daemon restarts
 - **Sequence numbers** — per-session monotonic ordering
 - **OAuth login** — device authorization flow (RFC 8628) with Google; JWT tokens with automatic refresh
+- **Team admin dashboard** — web UI at [tailbus.co/dashboard](https://tailbus.co/dashboard) for managing teams, members, nodes, and invites
 
 ### Developer Experience
 
@@ -395,7 +396,9 @@ internal/
   coord/                        Coordination server
     server.go                     gRPC server, peer map distribution
     store.go                      SQLite persistence (pure Go, no CGo)
-    oauth.go                      RFC 8628 device auth + OIDC
+    oauth.go                      RFC 8628 device auth + browser OAuth + OIDC
+    rest.go                       REST API for dashboard (/api/v1/)
+    cors.go                       CORS middleware
 
   daemon/                       Node daemon
     daemon.go                     Main orchestrator
@@ -462,6 +465,7 @@ key_file = "/tmp/tailbus-coord/coord.key"
 # OAuth (browser-based login)
 oauth_http_addr = ":8080"
 # external_url = "https://coord.tailbus.co"
+# web_app_url = "https://tailbus.co"
 # insecure_grpc = false
 # jwt_secret = ""
 
@@ -480,6 +484,7 @@ oauth_http_addr = ":8080"
 | `auth_tokens` | `[]` | Pre-auth tokens for admission control |
 | `oauth_http_addr` | `:8080` | OAuth HTTP listen address |
 | `external_url` | (none) | Public URL for OAuth callbacks |
+| `web_app_url` | `https://tailbus.co` | Web app URL for CORS and browser OAuth redirect |
 | `insecure_grpc` | `false` | Disable gRPC TLS (for edge TLS termination) |
 | `relay_addr` | (none) | Embedded relay listen address |
 | `relay_advertise_addr` | same as `relay_addr` | Address daemons connect to for relay |

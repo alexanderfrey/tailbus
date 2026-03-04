@@ -109,6 +109,13 @@ func main() {
 		logger.Info("admission control enabled", "tokens", len(cfg.AuthTokens))
 	}
 
+	// Resolve web app URL for CORS + browser OAuth redirect
+	webAppURL := cfg.WebAppURL
+	if webAppURL == "" {
+		webAppURL = "https://tailbus.co"
+	}
+	srv.SetCORSOrigin(webAppURL)
+
 	// Set up JWT issuer if OAuth providers are configured or JWT secret is set
 	if len(cfg.OAuthProviders) > 0 || cfg.JWTSecret != "" {
 		jwtIssuer, err := coord.NewJWTIssuer(cfg.DataDir, cfg.JWTSecret)
@@ -117,6 +124,7 @@ func main() {
 			os.Exit(1)
 		}
 		srv.SetJWT(jwtIssuer)
+		srv.SetREST(coord.NewRESTHandler(store, jwtIssuer, logger))
 		logger.Info("JWT authentication enabled")
 
 		// Set up OAuth device flow if providers are configured
@@ -151,6 +159,7 @@ func main() {
 			oauthSrv, err := coord.NewOAuthServer(&coord.OAuthConfig{
 				Providers:   providers,
 				ExternalURL: externalURL,
+				WebAppURL:   webAppURL,
 			}, jwtIssuer, logger)
 			if err != nil {
 				logger.Error("failed to create OAuth server", "error", err)
