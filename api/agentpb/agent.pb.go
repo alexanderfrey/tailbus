@@ -1267,6 +1267,10 @@ type HandleInfo struct {
 	// Deprecated: Marked as deprecated in tailbus/v1/agent.proto.
 	Description   string                     `protobuf:"bytes,3,opt,name=description,proto3" json:"description,omitempty"`
 	Manifest      *messagepb.ServiceManifest `protobuf:"bytes,4,opt,name=manifest,proto3" json:"manifest,omitempty"`
+	MessagesIn    int64                      `protobuf:"varint,5,opt,name=messages_in,json=messagesIn,proto3" json:"messages_in,omitempty"`
+	MessagesOut   int64                      `protobuf:"varint,6,opt,name=messages_out,json=messagesOut,proto3" json:"messages_out,omitempty"`
+	Drops         int64                      `protobuf:"varint,7,opt,name=drops,proto3" json:"drops,omitempty"`
+	QueueDepth    int32                      `protobuf:"varint,8,opt,name=queue_depth,json=queueDepth,proto3" json:"queue_depth,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1328,6 +1332,34 @@ func (x *HandleInfo) GetManifest() *messagepb.ServiceManifest {
 		return x.Manifest
 	}
 	return nil
+}
+
+func (x *HandleInfo) GetMessagesIn() int64 {
+	if x != nil {
+		return x.MessagesIn
+	}
+	return 0
+}
+
+func (x *HandleInfo) GetMessagesOut() int64 {
+	if x != nil {
+		return x.MessagesOut
+	}
+	return 0
+}
+
+func (x *HandleInfo) GetDrops() int64 {
+	if x != nil {
+		return x.Drops
+	}
+	return 0
+}
+
+func (x *HandleInfo) GetQueueDepth() int32 {
+	if x != nil {
+		return x.QueueDepth
+	}
+	return 0
 }
 
 type PeerStatus struct {
@@ -2142,13 +2174,19 @@ const file_tailbus_v1_agent_proto_rawDesc = "" +
 	"\vRelayStatus\x12\x17\n" +
 	"\anode_id\x18\x01 \x01(\tR\x06nodeId\x12\x12\n" +
 	"\x04addr\x18\x02 \x01(\tR\x04addr\x12\x1c\n" +
-	"\tconnected\x18\x03 \x01(\bR\tconnected\"\xaa\x01\n" +
+	"\tconnected\x18\x03 \x01(\bR\tconnected\"\xa5\x02\n" +
 	"\n" +
 	"HandleInfo\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12)\n" +
 	"\x10subscriber_count\x18\x02 \x01(\x05R\x0fsubscriberCount\x12$\n" +
 	"\vdescription\x18\x03 \x01(\tB\x02\x18\x01R\vdescription\x127\n" +
-	"\bmanifest\x18\x04 \x01(\v2\x1b.tailbus.v1.ServiceManifestR\bmanifest\"\x84\x01\n" +
+	"\bmanifest\x18\x04 \x01(\v2\x1b.tailbus.v1.ServiceManifestR\bmanifest\x12\x1f\n" +
+	"\vmessages_in\x18\x05 \x01(\x03R\n" +
+	"messagesIn\x12!\n" +
+	"\fmessages_out\x18\x06 \x01(\x03R\vmessagesOut\x12\x14\n" +
+	"\x05drops\x18\a \x01(\x03R\x05drops\x12\x1f\n" +
+	"\vqueue_depth\x18\b \x01(\x05R\n" +
+	"queueDepth\"\x84\x01\n" +
 	"\n" +
 	"PeerStatus\x12\x17\n" +
 	"\anode_id\x18\x01 \x01(\tR\x06nodeId\x12%\n" +

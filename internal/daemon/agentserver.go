@@ -54,6 +54,13 @@ func (ct *connTracker) HandleConn(ctx context.Context, s stats.ConnStats) {
 func (ct *connTracker) TagRPC(ctx context.Context, _ *stats.RPCTagInfo) context.Context { return ctx }
 func (ct *connTracker) HandleRPC(context.Context, stats.RPCStats)                       {}
 
+// handleStats tracks per-handle message counters.
+type handleStats struct {
+	msgsIn  atomic.Int64
+	msgsOut atomic.Int64
+	drops   atomic.Int64
+}
+
 // Router is the interface the agent server uses to send outbound messages.
 type Router interface {
 	Route(ctx context.Context, env *messagepb.Envelope) error
@@ -81,6 +88,9 @@ type AgentServer struct {
 	subscribers     map[string][]chan *agentpb.IncomingMessage                             // handle -> subscriber channels
 	onHandleChange  func(handles []string, manifests map[string]*messagepb.ServiceManifest) // called when handles change
 
+	// Per-handle health stats
+	hstats map[string]*handleStats
+
 	// Connection-based handle ownership
 	connHandles map[uint64]map[string]bool // connID -> set of handles
 	handleOwner map[string]uint64          // handle -> owning connID
@@ -105,6 +115,7 @@ func NewAgentServer(sessions *session.Store, router Router, activity *ActivityBu
 		handles:     make(map[string]bool),
 		manifests:   make(map[string]*messagepb.ServiceManifest),
 		subscribers: make(map[string][]chan *agentpb.IncomingMessage),
+		hstats:      make(map[string]*handleStats),
 		connHandles: make(map[uint64]map[string]bool),
 		handleOwner: make(map[string]uint64),
 		startedAt:   time.Now(),
@@ -255,6 +266,7 @@ func (s *AgentServer) disconnectConn(id uint64) {
 	for h := range handles {
 		delete(s.handles, h)
 		delete(s.manifests, h)
+		delete(s.hstats, h)
 		delete(s.handleOwner, h)
 		removedHandles = append(removedHandles, h)
 
@@ -316,6 +328,7 @@ func (s *AgentServer) DeliverToLocal(env *messagepb.Envelope) bool {
 
 	s.mu.RLock()
 	subs := s.subscribers[env.ToHandle]
+	hs := s.hstats[env.ToHandle]
 	s.mu.RUnlock()
 
 	if len(subs) == 0 {
@@ -326,8 +339,14 @@ func (s *AgentServer) DeliverToLocal(env *messagepb.Envelope) bool {
 	for _, ch := range subs {
 		select {
 		case ch <- msg:
+			if hs != nil {
+				hs.msgsIn.Add(1)
+			}
 		default:
 			s.logger.Warn("subscriber channel full, dropping message", "handle", env.ToHandle)
+			if hs != nil {
+				hs.drops.Add(1)
+			}
 		}
 	}
 
@@ -379,6 +398,7 @@ func (s *AgentServer) Register(ctx context.Context, req *agentpb.RegisterRequest
 	}
 
 	s.handles[req.Handle] = true
+	s.hstats[req.Handle] = &handleStats{}
 
 	// Bind handle to connection
 	if connID, ok := connIDFromCtx(ctx); ok {
@@ -461,6 +481,12 @@ func (s *AgentServer) OpenSession(ctx context.Context, req *agentpb.OpenSessionR
 		return nil, fmt.Errorf("route session open: %w", err)
 	}
 
+	s.mu.RLock()
+	if hs := s.hstats[req.FromHandle]; hs != nil {
+		hs.msgsOut.Add(1)
+	}
+	s.mu.RUnlock()
+
 	if s.activity != nil {
 		s.activity.EmitSessionOpened(sess.ID, req.FromHandle, req.ToHandle)
 	}
@@ -517,6 +543,12 @@ func (s *AgentServer) SendMessage(ctx context.Context, req *agentpb.SendMessageR
 	if err := s.router.Route(ctx, env); err != nil {
 		return nil, fmt.Errorf("route message: %w", err)
 	}
+
+	s.mu.RLock()
+	if hs := s.hstats[req.FromHandle]; hs != nil {
+		hs.msgsOut.Add(1)
+	}
+	s.mu.RUnlock()
 
 	// Check for @-mentions
 	s.maybeRouteMentions(ctx, req.FromHandle, toHandle, req.ContentType, req.Payload)
@@ -607,6 +639,12 @@ func (s *AgentServer) ResolveSession(ctx context.Context, req *agentpb.ResolveSe
 		return nil, fmt.Errorf("route resolve: %w", err)
 	}
 
+	s.mu.RLock()
+	if hs := s.hstats[req.FromHandle]; hs != nil {
+		hs.msgsOut.Add(1)
+	}
+	s.mu.RUnlock()
+
 	// Check for @-mentions in the resolve payload
 	s.maybeRouteMentions(ctx, req.FromHandle, toHandle, req.ContentType, req.Payload)
 
@@ -647,6 +685,16 @@ func (s *AgentServer) ListSessions(_ context.Context, req *agentpb.ListSessionsR
 	return &agentpb.ListSessionsResponse{Sessions: infos}, nil
 }
 
+// queueDepth returns the total buffered messages across all subscriber channels for a handle.
+// Must be called with s.mu held (at least RLock).
+func (s *AgentServer) queueDepth(handle string) int {
+	depth := 0
+	for _, ch := range s.subscribers[handle] {
+		depth += len(ch)
+	}
+	return depth
+}
+
 // GetNodeStatus returns a snapshot of the node's current state for the dashboard.
 func (s *AgentServer) GetNodeStatus(_ context.Context, _ *agentpb.GetNodeStatusRequest) (*agentpb.GetNodeStatusResponse, error) {
 	s.mu.RLock()
@@ -656,6 +704,12 @@ func (s *AgentServer) GetNodeStatus(_ context.Context, _ *agentpb.GetNodeStatusR
 		hi := &agentpb.HandleInfo{
 			Name:            h,
 			SubscriberCount: int32(len(s.subscribers[h])),
+			QueueDepth:      int32(s.queueDepth(h)),
+		}
+		if hs := s.hstats[h]; hs != nil {
+			hi.MessagesIn = hs.msgsIn.Load()
+			hi.MessagesOut = hs.msgsOut.Load()
+			hi.Drops = hs.drops.Load()
 		}
 		if m := s.manifests[h]; m != nil {
 			hi.Manifest = m

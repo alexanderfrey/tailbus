@@ -117,7 +117,7 @@ Every registered handle becomes a callable tool. If your agent declares commands
 
 - **Distributed tracing** — every session gets a `trace_id`; spans are recorded at each hop
 - **Prometheus metrics** — counters and histograms at `/metrics` for external monitoring
-- **Real-time TUI dashboard** — terminal UI with mesh topology view, handles, peers, sessions, and live activity
+- **Real-time TUI dashboard** — terminal UI with mesh topology, per-handle health counters (in/out/drops/queue), sessions, and live activity
 - **Web chat UI** — browser-based interface embedded in the daemon for testing and debugging
 
 ### Reliability
@@ -628,7 +628,20 @@ tailbus trace <trace-id>
 tailbus dashboard
 ```
 
-Top panel shows mesh topology (ASCII graph or compact list); bottom panels show handles, sessions, and activity. Keyboard: `q` quit, `r` refresh, `c` clear, `Tab` toggle topology/detail view.
+Top panel shows mesh topology (ASCII graph or compact list); bottom panels show handles, sessions, and activity. Each handle displays live health counters:
+
+```
+HANDLES
+  echo (2 subs) ↓42 ↑38 q:2
+  calculator (1 subs) ↓10 ↑10
+  overloaded (1 subs) ↓99 ↑50 q:48 drop:3
+```
+
+- **↓** messages delivered to the handle (in), **↑** messages sent from the handle (out)
+- **q:** current queue depth (yellow when > 50% capacity)
+- **drop:** messages dropped due to full subscriber channels (red)
+
+Keyboard: `q` quit, `r` refresh, `c` clear, `Tab` toggle topology/detail view.
 
 ### Health Endpoints
 

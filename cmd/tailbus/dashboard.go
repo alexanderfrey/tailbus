@@ -76,6 +76,12 @@ var (
 
 	relayEdgeStyle = lipgloss.NewStyle().
 			Foreground(lipgloss.Color("220"))
+
+	dropStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("196"))
+
+	queueWarnStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("220"))
 )
 
 // Top panel view mode
@@ -773,8 +779,20 @@ func (m dashboardModel) renderHandlesSessions(width int) string {
 		b.WriteString(helpStyle.Render("  (none)") + "\n")
 	} else {
 		for _, h := range m.status.Handles {
-			line := fmt.Sprintf("  %s (%d subs)", h.Name, h.SubscriberCount)
-			if len(line) > width-2 {
+			line := fmt.Sprintf("  %s (%d subs) \u2193%d \u2191%d",
+				h.Name, h.SubscriberCount, h.MessagesIn, h.MessagesOut)
+			if h.QueueDepth > 0 {
+				qs := fmt.Sprintf(" q:%d", h.QueueDepth)
+				if h.QueueDepth > 32 {
+					line += queueWarnStyle.Render(qs)
+				} else {
+					line += qs
+				}
+			}
+			if h.Drops > 0 {
+				line += " " + dropStyle.Render(fmt.Sprintf("drop:%d", h.Drops))
+			}
+			if lipgloss.Width(line) > width-2 {
 				line = line[:width-2]
 			}
 			b.WriteString(line + "\n")

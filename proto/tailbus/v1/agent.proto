@@ -142,6 +142,10 @@ message HandleInfo {
   int32 subscriber_count = 2;
   string description = 3 [deprecated = true];
   ServiceManifest manifest = 4;
+  int64 messages_in = 5;
+  int64 messages_out = 6;
+  int64 drops = 7;
+  int32 queue_depth = 8;
 }
 
 message PeerStatus {
