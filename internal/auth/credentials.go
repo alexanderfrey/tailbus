@@ -24,6 +24,8 @@ type Credentials struct {
 	Email        string `json:"email"`
 	CoordAddr    string `json:"coord_addr"`
 	ExpiresAt    int64  `json:"expires_at"` // Unix timestamp
+	TeamID       string `json:"team_id,omitempty"`
+	TeamName     string `json:"team_name,omitempty"`
 }
 
 // NeedsRefresh returns true if the access token is expired or will expire within 5 minutes.

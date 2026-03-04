@@ -316,7 +316,7 @@ func TestBroadcastSuppressedWhenUnchanged(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
 
 	pm := NewPeerMap(store, logger)
-	ch := pm.AddWatcher("watcher-1")
+	ch := pm.AddWatcher("watcher-1", "")
 	defer pm.RemoveWatcher("watcher-1")
 
 	// Register a node
@@ -364,7 +364,7 @@ func TestBroadcastTriggeredOnChange(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
 
 	pm := NewPeerMap(store, logger)
-	ch := pm.AddWatcher("watcher-1")
+	ch := pm.AddWatcher("watcher-1", "")
 	defer pm.RemoveWatcher("watcher-1")
 
 	// Register a node

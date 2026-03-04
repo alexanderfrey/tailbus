@@ -33,6 +33,7 @@ type RegisterNodeRequest struct {
 	HandleManifests    map[string]*messagepb.ServiceManifest `protobuf:"bytes,6,rep,name=handle_manifests,json=handleManifests,proto3" json:"handle_manifests,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
 	IsRelay            bool                                  `protobuf:"varint,7,opt,name=is_relay,json=isRelay,proto3" json:"is_relay,omitempty"`
 	AuthToken          string                                `protobuf:"bytes,8,opt,name=auth_token,json=authToken,proto3" json:"auth_token,omitempty"`
+	TeamId             string                                `protobuf:"bytes,9,opt,name=team_id,json=teamId,proto3" json:"team_id,omitempty"`
 	unknownFields      protoimpl.UnknownFields
 	sizeCache          protoimpl.SizeCache
 }
@@ -124,12 +125,21 @@ func (x *RegisterNodeRequest) GetAuthToken() string {
 	return ""
 }
 
+func (x *RegisterNodeRequest) GetTeamId() string {
+	if x != nil {
+		return x.TeamId
+	}
+	return ""
+}
+
 type RegisterNodeResponse struct {
 	state          protoimpl.MessageState `protogen:"open.v1"`
 	Ok             bool                   `protobuf:"varint,1,opt,name=ok,proto3" json:"ok,omitempty"`
 	Error          string                 `protobuf:"bytes,2,opt,name=error,proto3" json:"error,omitempty"`
 	UserEmail      string                 `protobuf:"bytes,3,opt,name=user_email,json=userEmail,proto3" json:"user_email,omitempty"`
 	TokenExpiresAt int64                  `protobuf:"varint,4,opt,name=token_expires_at,json=tokenExpiresAt,proto3" json:"token_expires_at,omitempty"`
+	TeamId         string                 `protobuf:"bytes,5,opt,name=team_id,json=teamId,proto3" json:"team_id,omitempty"`
+	TeamName       string                 `protobuf:"bytes,6,opt,name=team_name,json=teamName,proto3" json:"team_name,omitempty"`
 	unknownFields  protoimpl.UnknownFields
 	sizeCache      protoimpl.SizeCache
 }
@@ -192,9 +202,24 @@ func (x *RegisterNodeResponse) GetTokenExpiresAt() int64 {
 	return 0
 }
 
+func (x *RegisterNodeResponse) GetTeamId() string {
+	if x != nil {
+		return x.TeamId
+	}
+	return ""
+}
+
+func (x *RegisterNodeResponse) GetTeamName() string {
+	if x != nil {
+		return x.TeamName
+	}
+	return ""
+}
+
 type WatchPeerMapRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	NodeId        string                 `protobuf:"bytes,1,opt,name=node_id,json=nodeId,proto3" json:"node_id,omitempty"`
+	TeamId        string                 `protobuf:"bytes,2,opt,name=team_id,json=teamId,proto3" json:"team_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -232,6 +257,13 @@ func (*WatchPeerMapRequest) Descriptor() ([]byte, []int) {
 func (x *WatchPeerMapRequest) GetNodeId() string {
 	if x != nil {
 		return x.NodeId
+	}
+	return ""
+}
+
+func (x *WatchPeerMapRequest) GetTeamId() string {
+	if x != nil {
+		return x.TeamId
 	}
 	return ""
 }
@@ -453,6 +485,7 @@ func (x *PeerInfo) GetHandleManifests() map[string]*messagepb.ServiceManifest {
 type LookupHandleRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Handle        string                 `protobuf:"bytes,1,opt,name=handle,proto3" json:"handle,omitempty"`
+	TeamId        string                 `protobuf:"bytes,2,opt,name=team_id,json=teamId,proto3" json:"team_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -490,6 +523,13 @@ func (*LookupHandleRequest) Descriptor() ([]byte, []int) {
 func (x *LookupHandleRequest) GetHandle() string {
 	if x != nil {
 		return x.Handle
+	}
+	return ""
+}
+
+func (x *LookupHandleRequest) GetTeamId() string {
+	if x != nil {
+		return x.TeamId
 	}
 	return ""
 }
@@ -660,12 +700,676 @@ func (x *HeartbeatResponse) GetOk() bool {
 	return false
 }
 
+type CreateTeamRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	AuthToken     string                 `protobuf:"bytes,1,opt,name=auth_token,json=authToken,proto3" json:"auth_token,omitempty"`
+	Name          string                 `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *CreateTeamRequest) Reset() {
+	*x = CreateTeamRequest{}
+	mi := &file_tailbus_v1_coord_proto_msgTypes[10]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *CreateTeamRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CreateTeamRequest) ProtoMessage() {}
+
+func (x *CreateTeamRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_tailbus_v1_coord_proto_msgTypes[10]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CreateTeamRequest.ProtoReflect.Descriptor instead.
+func (*CreateTeamRequest) Descriptor() ([]byte, []int) {
+	return file_tailbus_v1_coord_proto_rawDescGZIP(), []int{10}
+}
+
+func (x *CreateTeamRequest) GetAuthToken() string {
+	if x != nil {
+		return x.AuthToken
+	}
+	return ""
+}
+
+func (x *CreateTeamRequest) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+type CreateTeamResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	TeamId        string                 `protobuf:"bytes,1,opt,name=team_id,json=teamId,proto3" json:"team_id,omitempty"`
+	Name          string                 `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`
+	Error         string                 `protobuf:"bytes,3,opt,name=error,proto3" json:"error,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *CreateTeamResponse) Reset() {
+	*x = CreateTeamResponse{}
+	mi := &file_tailbus_v1_coord_proto_msgTypes[11]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *CreateTeamResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CreateTeamResponse) ProtoMessage() {}
+
+func (x *CreateTeamResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_tailbus_v1_coord_proto_msgTypes[11]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CreateTeamResponse.ProtoReflect.Descriptor instead.
+func (*CreateTeamResponse) Descriptor() ([]byte, []int) {
+	return file_tailbus_v1_coord_proto_rawDescGZIP(), []int{11}
+}
+
+func (x *CreateTeamResponse) GetTeamId() string {
+	if x != nil {
+		return x.TeamId
+	}
+	return ""
+}
+
+func (x *CreateTeamResponse) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+func (x *CreateTeamResponse) GetError() string {
+	if x != nil {
+		return x.Error
+	}
+	return ""
+}
+
+type ListTeamsRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	AuthToken     string                 `protobuf:"bytes,1,opt,name=auth_token,json=authToken,proto3" json:"auth_token,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ListTeamsRequest) Reset() {
+	*x = ListTeamsRequest{}
+	mi := &file_tailbus_v1_coord_proto_msgTypes[12]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ListTeamsRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListTeamsRequest) ProtoMessage() {}
+
+func (x *ListTeamsRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_tailbus_v1_coord_proto_msgTypes[12]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListTeamsRequest.ProtoReflect.Descriptor instead.
+func (*ListTeamsRequest) Descriptor() ([]byte, []int) {
+	return file_tailbus_v1_coord_proto_rawDescGZIP(), []int{12}
+}
+
+func (x *ListTeamsRequest) GetAuthToken() string {
+	if x != nil {
+		return x.AuthToken
+	}
+	return ""
+}
+
+type ListTeamsResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Teams         []*TeamInfo            `protobuf:"bytes,1,rep,name=teams,proto3" json:"teams,omitempty"`
+	Error         string                 `protobuf:"bytes,2,opt,name=error,proto3" json:"error,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ListTeamsResponse) Reset() {
+	*x = ListTeamsResponse{}
+	mi := &file_tailbus_v1_coord_proto_msgTypes[13]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ListTeamsResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListTeamsResponse) ProtoMessage() {}
+
+func (x *ListTeamsResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_tailbus_v1_coord_proto_msgTypes[13]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListTeamsResponse.ProtoReflect.Descriptor instead.
+func (*ListTeamsResponse) Descriptor() ([]byte, []int) {
+	return file_tailbus_v1_coord_proto_rawDescGZIP(), []int{13}
+}
+
+func (x *ListTeamsResponse) GetTeams() []*TeamInfo {
+	if x != nil {
+		return x.Teams
+	}
+	return nil
+}
+
+func (x *ListTeamsResponse) GetError() string {
+	if x != nil {
+		return x.Error
+	}
+	return ""
+}
+
+type TeamInfo struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	TeamId        string                 `protobuf:"bytes,1,opt,name=team_id,json=teamId,proto3" json:"team_id,omitempty"`
+	Name          string                 `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`
+	Role          string                 `protobuf:"bytes,3,opt,name=role,proto3" json:"role,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *TeamInfo) Reset() {
+	*x = TeamInfo{}
+	mi := &file_tailbus_v1_coord_proto_msgTypes[14]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *TeamInfo) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*TeamInfo) ProtoMessage() {}
+
+func (x *TeamInfo) ProtoReflect() protoreflect.Message {
+	mi := &file_tailbus_v1_coord_proto_msgTypes[14]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use TeamInfo.ProtoReflect.Descriptor instead.
+func (*TeamInfo) Descriptor() ([]byte, []int) {
+	return file_tailbus_v1_coord_proto_rawDescGZIP(), []int{14}
+}
+
+func (x *TeamInfo) GetTeamId() string {
+	if x != nil {
+		return x.TeamId
+	}
+	return ""
+}
+
+func (x *TeamInfo) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+func (x *TeamInfo) GetRole() string {
+	if x != nil {
+		return x.Role
+	}
+	return ""
+}
+
+type GetTeamMembersRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	AuthToken     string                 `protobuf:"bytes,1,opt,name=auth_token,json=authToken,proto3" json:"auth_token,omitempty"`
+	TeamId        string                 `protobuf:"bytes,2,opt,name=team_id,json=teamId,proto3" json:"team_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetTeamMembersRequest) Reset() {
+	*x = GetTeamMembersRequest{}
+	mi := &file_tailbus_v1_coord_proto_msgTypes[15]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetTeamMembersRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetTeamMembersRequest) ProtoMessage() {}
+
+func (x *GetTeamMembersRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_tailbus_v1_coord_proto_msgTypes[15]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetTeamMembersRequest.ProtoReflect.Descriptor instead.
+func (*GetTeamMembersRequest) Descriptor() ([]byte, []int) {
+	return file_tailbus_v1_coord_proto_rawDescGZIP(), []int{15}
+}
+
+func (x *GetTeamMembersRequest) GetAuthToken() string {
+	if x != nil {
+		return x.AuthToken
+	}
+	return ""
+}
+
+func (x *GetTeamMembersRequest) GetTeamId() string {
+	if x != nil {
+		return x.TeamId
+	}
+	return ""
+}
+
+type GetTeamMembersResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Members       []*TeamMember          `protobuf:"bytes,1,rep,name=members,proto3" json:"members,omitempty"`
+	Error         string                 `protobuf:"bytes,2,opt,name=error,proto3" json:"error,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetTeamMembersResponse) Reset() {
+	*x = GetTeamMembersResponse{}
+	mi := &file_tailbus_v1_coord_proto_msgTypes[16]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetTeamMembersResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetTeamMembersResponse) ProtoMessage() {}
+
+func (x *GetTeamMembersResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_tailbus_v1_coord_proto_msgTypes[16]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetTeamMembersResponse.ProtoReflect.Descriptor instead.
+func (*GetTeamMembersResponse) Descriptor() ([]byte, []int) {
+	return file_tailbus_v1_coord_proto_rawDescGZIP(), []int{16}
+}
+
+func (x *GetTeamMembersResponse) GetMembers() []*TeamMember {
+	if x != nil {
+		return x.Members
+	}
+	return nil
+}
+
+func (x *GetTeamMembersResponse) GetError() string {
+	if x != nil {
+		return x.Error
+	}
+	return ""
+}
+
+type TeamMember struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Email         string                 `protobuf:"bytes,1,opt,name=email,proto3" json:"email,omitempty"`
+	Role          string                 `protobuf:"bytes,2,opt,name=role,proto3" json:"role,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *TeamMember) Reset() {
+	*x = TeamMember{}
+	mi := &file_tailbus_v1_coord_proto_msgTypes[17]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *TeamMember) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*TeamMember) ProtoMessage() {}
+
+func (x *TeamMember) ProtoReflect() protoreflect.Message {
+	mi := &file_tailbus_v1_coord_proto_msgTypes[17]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use TeamMember.ProtoReflect.Descriptor instead.
+func (*TeamMember) Descriptor() ([]byte, []int) {
+	return file_tailbus_v1_coord_proto_rawDescGZIP(), []int{17}
+}
+
+func (x *TeamMember) GetEmail() string {
+	if x != nil {
+		return x.Email
+	}
+	return ""
+}
+
+func (x *TeamMember) GetRole() string {
+	if x != nil {
+		return x.Role
+	}
+	return ""
+}
+
+type CreateTeamInviteRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	AuthToken     string                 `protobuf:"bytes,1,opt,name=auth_token,json=authToken,proto3" json:"auth_token,omitempty"`
+	TeamId        string                 `protobuf:"bytes,2,opt,name=team_id,json=teamId,proto3" json:"team_id,omitempty"`
+	MaxUses       int32                  `protobuf:"varint,3,opt,name=max_uses,json=maxUses,proto3" json:"max_uses,omitempty"`
+	TtlSeconds    int64                  `protobuf:"varint,4,opt,name=ttl_seconds,json=ttlSeconds,proto3" json:"ttl_seconds,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *CreateTeamInviteRequest) Reset() {
+	*x = CreateTeamInviteRequest{}
+	mi := &file_tailbus_v1_coord_proto_msgTypes[18]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *CreateTeamInviteRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CreateTeamInviteRequest) ProtoMessage() {}
+
+func (x *CreateTeamInviteRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_tailbus_v1_coord_proto_msgTypes[18]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CreateTeamInviteRequest.ProtoReflect.Descriptor instead.
+func (*CreateTeamInviteRequest) Descriptor() ([]byte, []int) {
+	return file_tailbus_v1_coord_proto_rawDescGZIP(), []int{18}
+}
+
+func (x *CreateTeamInviteRequest) GetAuthToken() string {
+	if x != nil {
+		return x.AuthToken
+	}
+	return ""
+}
+
+func (x *CreateTeamInviteRequest) GetTeamId() string {
+	if x != nil {
+		return x.TeamId
+	}
+	return ""
+}
+
+func (x *CreateTeamInviteRequest) GetMaxUses() int32 {
+	if x != nil {
+		return x.MaxUses
+	}
+	return 0
+}
+
+func (x *CreateTeamInviteRequest) GetTtlSeconds() int64 {
+	if x != nil {
+		return x.TtlSeconds
+	}
+	return 0
+}
+
+type CreateTeamInviteResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Code          string                 `protobuf:"bytes,1,opt,name=code,proto3" json:"code,omitempty"`
+	ExpiresAt     int64                  `protobuf:"varint,2,opt,name=expires_at,json=expiresAt,proto3" json:"expires_at,omitempty"`
+	Error         string                 `protobuf:"bytes,3,opt,name=error,proto3" json:"error,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *CreateTeamInviteResponse) Reset() {
+	*x = CreateTeamInviteResponse{}
+	mi := &file_tailbus_v1_coord_proto_msgTypes[19]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *CreateTeamInviteResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CreateTeamInviteResponse) ProtoMessage() {}
+
+func (x *CreateTeamInviteResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_tailbus_v1_coord_proto_msgTypes[19]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CreateTeamInviteResponse.ProtoReflect.Descriptor instead.
+func (*CreateTeamInviteResponse) Descriptor() ([]byte, []int) {
+	return file_tailbus_v1_coord_proto_rawDescGZIP(), []int{19}
+}
+
+func (x *CreateTeamInviteResponse) GetCode() string {
+	if x != nil {
+		return x.Code
+	}
+	return ""
+}
+
+func (x *CreateTeamInviteResponse) GetExpiresAt() int64 {
+	if x != nil {
+		return x.ExpiresAt
+	}
+	return 0
+}
+
+func (x *CreateTeamInviteResponse) GetError() string {
+	if x != nil {
+		return x.Error
+	}
+	return ""
+}
+
+type AcceptTeamInviteRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	AuthToken     string                 `protobuf:"bytes,1,opt,name=auth_token,json=authToken,proto3" json:"auth_token,omitempty"`
+	Code          string                 `protobuf:"bytes,2,opt,name=code,proto3" json:"code,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *AcceptTeamInviteRequest) Reset() {
+	*x = AcceptTeamInviteRequest{}
+	mi := &file_tailbus_v1_coord_proto_msgTypes[20]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AcceptTeamInviteRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AcceptTeamInviteRequest) ProtoMessage() {}
+
+func (x *AcceptTeamInviteRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_tailbus_v1_coord_proto_msgTypes[20]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AcceptTeamInviteRequest.ProtoReflect.Descriptor instead.
+func (*AcceptTeamInviteRequest) Descriptor() ([]byte, []int) {
+	return file_tailbus_v1_coord_proto_rawDescGZIP(), []int{20}
+}
+
+func (x *AcceptTeamInviteRequest) GetAuthToken() string {
+	if x != nil {
+		return x.AuthToken
+	}
+	return ""
+}
+
+func (x *AcceptTeamInviteRequest) GetCode() string {
+	if x != nil {
+		return x.Code
+	}
+	return ""
+}
+
+type AcceptTeamInviteResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	TeamId        string                 `protobuf:"bytes,1,opt,name=team_id,json=teamId,proto3" json:"team_id,omitempty"`
+	TeamName      string                 `protobuf:"bytes,2,opt,name=team_name,json=teamName,proto3" json:"team_name,omitempty"`
+	Error         string                 `protobuf:"bytes,3,opt,name=error,proto3" json:"error,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *AcceptTeamInviteResponse) Reset() {
+	*x = AcceptTeamInviteResponse{}
+	mi := &file_tailbus_v1_coord_proto_msgTypes[21]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AcceptTeamInviteResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AcceptTeamInviteResponse) ProtoMessage() {}
+
+func (x *AcceptTeamInviteResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_tailbus_v1_coord_proto_msgTypes[21]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AcceptTeamInviteResponse.ProtoReflect.Descriptor instead.
+func (*AcceptTeamInviteResponse) Descriptor() ([]byte, []int) {
+	return file_tailbus_v1_coord_proto_rawDescGZIP(), []int{21}
+}
+
+func (x *AcceptTeamInviteResponse) GetTeamId() string {
+	if x != nil {
+		return x.TeamId
+	}
+	return ""
+}
+
+func (x *AcceptTeamInviteResponse) GetTeamName() string {
+	if x != nil {
+		return x.TeamName
+	}
+	return ""
+}
+
+func (x *AcceptTeamInviteResponse) GetError() string {
+	if x != nil {
+		return x.Error
+	}
+	return ""
+}
+
 var File_tailbus_v1_coord_proto protoreflect.FileDescriptor
 
 const file_tailbus_v1_coord_proto_rawDesc = "" +
 	"\n" +
 	"\x16tailbus/v1/coord.proto\x12\n" +
-	"tailbus.v1\x1a\x19tailbus/v1/messages.proto\"\xbf\x04\n" +
+	"tailbus.v1\x1a\x19tailbus/v1/messages.proto\"\xd8\x04\n" +
 	"\x13RegisterNodeRequest\x12\x17\n" +
 	"\anode_id\x18\x01 \x01(\tR\x06nodeId\x12\x1d\n" +
 	"\n" +
@@ -676,21 +1380,25 @@ const file_tailbus_v1_coord_proto_rawDesc = "" +
 	"\x10handle_manifests\x18\x06 \x03(\v24.tailbus.v1.RegisterNodeRequest.HandleManifestsEntryR\x0fhandleManifests\x12\x19\n" +
 	"\bis_relay\x18\a \x01(\bR\aisRelay\x12\x1d\n" +
 	"\n" +
-	"auth_token\x18\b \x01(\tR\tauthToken\x1aE\n" +
+	"auth_token\x18\b \x01(\tR\tauthToken\x12\x17\n" +
+	"\ateam_id\x18\t \x01(\tR\x06teamId\x1aE\n" +
 	"\x17HandleDescriptionsEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\x1a_\n" +
 	"\x14HandleManifestsEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x121\n" +
-	"\x05value\x18\x02 \x01(\v2\x1b.tailbus.v1.ServiceManifestR\x05value:\x028\x01\"\x85\x01\n" +
+	"\x05value\x18\x02 \x01(\v2\x1b.tailbus.v1.ServiceManifestR\x05value:\x028\x01\"\xbb\x01\n" +
 	"\x14RegisterNodeResponse\x12\x0e\n" +
 	"\x02ok\x18\x01 \x01(\bR\x02ok\x12\x14\n" +
 	"\x05error\x18\x02 \x01(\tR\x05error\x12\x1d\n" +
 	"\n" +
 	"user_email\x18\x03 \x01(\tR\tuserEmail\x12(\n" +
-	"\x10token_expires_at\x18\x04 \x01(\x03R\x0etokenExpiresAt\".\n" +
+	"\x10token_expires_at\x18\x04 \x01(\x03R\x0etokenExpiresAt\x12\x17\n" +
+	"\ateam_id\x18\x05 \x01(\tR\x06teamId\x12\x1b\n" +
+	"\tteam_name\x18\x06 \x01(\tR\bteamName\"G\n" +
 	"\x13WatchPeerMapRequest\x12\x17\n" +
-	"\anode_id\x18\x01 \x01(\tR\x06nodeId\"\x84\x01\n" +
+	"\anode_id\x18\x01 \x01(\tR\x06nodeId\x12\x17\n" +
+	"\ateam_id\x18\x02 \x01(\tR\x06teamId\"\x84\x01\n" +
 	"\rPeerMapUpdate\x12*\n" +
 	"\x05peers\x18\x01 \x03(\v2\x14.tailbus.v1.PeerInfoR\x05peers\x12\x18\n" +
 	"\aversion\x18\x02 \x01(\x03R\aversion\x12-\n" +
@@ -714,9 +1422,10 @@ const file_tailbus_v1_coord_proto_rawDesc = "" +
 	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\x1a_\n" +
 	"\x14HandleManifestsEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x121\n" +
-	"\x05value\x18\x02 \x01(\v2\x1b.tailbus.v1.ServiceManifestR\x05value:\x028\x01\"-\n" +
+	"\x05value\x18\x02 \x01(\v2\x1b.tailbus.v1.ServiceManifestR\x05value:\x028\x01\"F\n" +
 	"\x13LookupHandleRequest\x12\x16\n" +
-	"\x06handle\x18\x01 \x01(\tR\x06handle\"V\n" +
+	"\x06handle\x18\x01 \x01(\tR\x06handle\x12\x17\n" +
+	"\ateam_id\x18\x02 \x01(\tR\x06teamId\"V\n" +
 	"\x14LookupHandleResponse\x12(\n" +
 	"\x04peer\x18\x01 \x01(\v2\x14.tailbus.v1.PeerInfoR\x04peer\x12\x14\n" +
 	"\x05found\x18\x02 \x01(\bR\x05found\"\xb6\x03\n" +
@@ -732,12 +1441,67 @@ const file_tailbus_v1_coord_proto_rawDesc = "" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x121\n" +
 	"\x05value\x18\x02 \x01(\v2\x1b.tailbus.v1.ServiceManifestR\x05value:\x028\x01\"#\n" +
 	"\x11HeartbeatResponse\x12\x0e\n" +
-	"\x02ok\x18\x01 \x01(\bR\x02ok2\xcf\x02\n" +
+	"\x02ok\x18\x01 \x01(\bR\x02ok\"F\n" +
+	"\x11CreateTeamRequest\x12\x1d\n" +
+	"\n" +
+	"auth_token\x18\x01 \x01(\tR\tauthToken\x12\x12\n" +
+	"\x04name\x18\x02 \x01(\tR\x04name\"W\n" +
+	"\x12CreateTeamResponse\x12\x17\n" +
+	"\ateam_id\x18\x01 \x01(\tR\x06teamId\x12\x12\n" +
+	"\x04name\x18\x02 \x01(\tR\x04name\x12\x14\n" +
+	"\x05error\x18\x03 \x01(\tR\x05error\"1\n" +
+	"\x10ListTeamsRequest\x12\x1d\n" +
+	"\n" +
+	"auth_token\x18\x01 \x01(\tR\tauthToken\"U\n" +
+	"\x11ListTeamsResponse\x12*\n" +
+	"\x05teams\x18\x01 \x03(\v2\x14.tailbus.v1.TeamInfoR\x05teams\x12\x14\n" +
+	"\x05error\x18\x02 \x01(\tR\x05error\"K\n" +
+	"\bTeamInfo\x12\x17\n" +
+	"\ateam_id\x18\x01 \x01(\tR\x06teamId\x12\x12\n" +
+	"\x04name\x18\x02 \x01(\tR\x04name\x12\x12\n" +
+	"\x04role\x18\x03 \x01(\tR\x04role\"O\n" +
+	"\x15GetTeamMembersRequest\x12\x1d\n" +
+	"\n" +
+	"auth_token\x18\x01 \x01(\tR\tauthToken\x12\x17\n" +
+	"\ateam_id\x18\x02 \x01(\tR\x06teamId\"`\n" +
+	"\x16GetTeamMembersResponse\x120\n" +
+	"\amembers\x18\x01 \x03(\v2\x16.tailbus.v1.TeamMemberR\amembers\x12\x14\n" +
+	"\x05error\x18\x02 \x01(\tR\x05error\"6\n" +
+	"\n" +
+	"TeamMember\x12\x14\n" +
+	"\x05email\x18\x01 \x01(\tR\x05email\x12\x12\n" +
+	"\x04role\x18\x02 \x01(\tR\x04role\"\x8d\x01\n" +
+	"\x17CreateTeamInviteRequest\x12\x1d\n" +
+	"\n" +
+	"auth_token\x18\x01 \x01(\tR\tauthToken\x12\x17\n" +
+	"\ateam_id\x18\x02 \x01(\tR\x06teamId\x12\x19\n" +
+	"\bmax_uses\x18\x03 \x01(\x05R\amaxUses\x12\x1f\n" +
+	"\vttl_seconds\x18\x04 \x01(\x03R\n" +
+	"ttlSeconds\"c\n" +
+	"\x18CreateTeamInviteResponse\x12\x12\n" +
+	"\x04code\x18\x01 \x01(\tR\x04code\x12\x1d\n" +
+	"\n" +
+	"expires_at\x18\x02 \x01(\x03R\texpiresAt\x12\x14\n" +
+	"\x05error\x18\x03 \x01(\tR\x05error\"L\n" +
+	"\x17AcceptTeamInviteRequest\x12\x1d\n" +
+	"\n" +
+	"auth_token\x18\x01 \x01(\tR\tauthToken\x12\x12\n" +
+	"\x04code\x18\x02 \x01(\tR\x04code\"f\n" +
+	"\x18AcceptTeamInviteResponse\x12\x17\n" +
+	"\ateam_id\x18\x01 \x01(\tR\x06teamId\x12\x1b\n" +
+	"\tteam_name\x18\x02 \x01(\tR\bteamName\x12\x14\n" +
+	"\x05error\x18\x03 \x01(\tR\x05error2\xfd\x05\n" +
 	"\x0fCoordinationAPI\x12Q\n" +
 	"\fRegisterNode\x12\x1f.tailbus.v1.RegisterNodeRequest\x1a .tailbus.v1.RegisterNodeResponse\x12L\n" +
 	"\fWatchPeerMap\x12\x1f.tailbus.v1.WatchPeerMapRequest\x1a\x19.tailbus.v1.PeerMapUpdate0\x01\x12Q\n" +
 	"\fLookupHandle\x12\x1f.tailbus.v1.LookupHandleRequest\x1a .tailbus.v1.LookupHandleResponse\x12H\n" +
-	"\tHeartbeat\x12\x1c.tailbus.v1.HeartbeatRequest\x1a\x1d.tailbus.v1.HeartbeatResponseB.Z,github.com/alexanderfrey/tailbus/api/coordpbb\x06proto3"
+	"\tHeartbeat\x12\x1c.tailbus.v1.HeartbeatRequest\x1a\x1d.tailbus.v1.HeartbeatResponse\x12K\n" +
+	"\n" +
+	"CreateTeam\x12\x1d.tailbus.v1.CreateTeamRequest\x1a\x1e.tailbus.v1.CreateTeamResponse\x12H\n" +
+	"\tListTeams\x12\x1c.tailbus.v1.ListTeamsRequest\x1a\x1d.tailbus.v1.ListTeamsResponse\x12W\n" +
+	"\x0eGetTeamMembers\x12!.tailbus.v1.GetTeamMembersRequest\x1a\".tailbus.v1.GetTeamMembersResponse\x12]\n" +
+	"\x10CreateTeamInvite\x12#.tailbus.v1.CreateTeamInviteRequest\x1a$.tailbus.v1.CreateTeamInviteResponse\x12]\n" +
+	"\x10AcceptTeamInvite\x12#.tailbus.v1.AcceptTeamInviteRequest\x1a$.tailbus.v1.AcceptTeamInviteResponseB.Z,github.com/alexanderfrey/tailbus/api/coordpbb\x06proto3"
 
 var (
 	file_tailbus_v1_coord_proto_rawDescOnce sync.Once
@@ -751,7 +1515,7 @@ func file_tailbus_v1_coord_proto_rawDescGZIP() []byte {
 	return file_tailbus_v1_coord_proto_rawDescData
 }
 
-var file_tailbus_v1_coord_proto_msgTypes = make([]protoimpl.MessageInfo, 16)
+var file_tailbus_v1_coord_proto_msgTypes = make([]protoimpl.MessageInfo, 28)
 var file_tailbus_v1_coord_proto_goTypes = []any{
 	(*RegisterNodeRequest)(nil),       // 0: tailbus.v1.RegisterNodeRequest
 	(*RegisterNodeResponse)(nil),      // 1: tailbus.v1.RegisterNodeResponse
@@ -763,40 +1527,64 @@ var file_tailbus_v1_coord_proto_goTypes = []any{
 	(*LookupHandleResponse)(nil),      // 7: tailbus.v1.LookupHandleResponse
 	(*HeartbeatRequest)(nil),          // 8: tailbus.v1.HeartbeatRequest
 	(*HeartbeatResponse)(nil),         // 9: tailbus.v1.HeartbeatResponse
-	nil,                               // 10: tailbus.v1.RegisterNodeRequest.HandleDescriptionsEntry
-	nil,                               // 11: tailbus.v1.RegisterNodeRequest.HandleManifestsEntry
-	nil,                               // 12: tailbus.v1.PeerInfo.HandleDescriptionsEntry
-	nil,                               // 13: tailbus.v1.PeerInfo.HandleManifestsEntry
-	nil,                               // 14: tailbus.v1.HeartbeatRequest.HandleDescriptionsEntry
-	nil,                               // 15: tailbus.v1.HeartbeatRequest.HandleManifestsEntry
-	(*messagepb.ServiceManifest)(nil), // 16: tailbus.v1.ServiceManifest
+	(*CreateTeamRequest)(nil),         // 10: tailbus.v1.CreateTeamRequest
+	(*CreateTeamResponse)(nil),        // 11: tailbus.v1.CreateTeamResponse
+	(*ListTeamsRequest)(nil),          // 12: tailbus.v1.ListTeamsRequest
+	(*ListTeamsResponse)(nil),         // 13: tailbus.v1.ListTeamsResponse
+	(*TeamInfo)(nil),                  // 14: tailbus.v1.TeamInfo
+	(*GetTeamMembersRequest)(nil),     // 15: tailbus.v1.GetTeamMembersRequest
+	(*GetTeamMembersResponse)(nil),    // 16: tailbus.v1.GetTeamMembersResponse
+	(*TeamMember)(nil),                // 17: tailbus.v1.TeamMember
+	(*CreateTeamInviteRequest)(nil),   // 18: tailbus.v1.CreateTeamInviteRequest
+	(*CreateTeamInviteResponse)(nil),  // 19: tailbus.v1.CreateTeamInviteResponse
+	(*AcceptTeamInviteRequest)(nil),   // 20: tailbus.v1.AcceptTeamInviteRequest
+	(*AcceptTeamInviteResponse)(nil),  // 21: tailbus.v1.AcceptTeamInviteResponse
+	nil,                               // 22: tailbus.v1.RegisterNodeRequest.HandleDescriptionsEntry
+	nil,                               // 23: tailbus.v1.RegisterNodeRequest.HandleManifestsEntry
+	nil,                               // 24: tailbus.v1.PeerInfo.HandleDescriptionsEntry
+	nil,                               // 25: tailbus.v1.PeerInfo.HandleManifestsEntry
+	nil,                               // 26: tailbus.v1.HeartbeatRequest.HandleDescriptionsEntry
+	nil,                               // 27: tailbus.v1.HeartbeatRequest.HandleManifestsEntry
+	(*messagepb.ServiceManifest)(nil), // 28: tailbus.v1.ServiceManifest
 }
 var file_tailbus_v1_coord_proto_depIdxs = []int32{
-	10, // 0: tailbus.v1.RegisterNodeRequest.handle_descriptions:type_name -> tailbus.v1.RegisterNodeRequest.HandleDescriptionsEntry
-	11, // 1: tailbus.v1.RegisterNodeRequest.handle_manifests:type_name -> tailbus.v1.RegisterNodeRequest.HandleManifestsEntry
+	22, // 0: tailbus.v1.RegisterNodeRequest.handle_descriptions:type_name -> tailbus.v1.RegisterNodeRequest.HandleDescriptionsEntry
+	23, // 1: tailbus.v1.RegisterNodeRequest.handle_manifests:type_name -> tailbus.v1.RegisterNodeRequest.HandleManifestsEntry
 	5,  // 2: tailbus.v1.PeerMapUpdate.peers:type_name -> tailbus.v1.PeerInfo
 	4,  // 3: tailbus.v1.PeerMapUpdate.relays:type_name -> tailbus.v1.RelayInfo
-	12, // 4: tailbus.v1.PeerInfo.handle_descriptions:type_name -> tailbus.v1.PeerInfo.HandleDescriptionsEntry
-	13, // 5: tailbus.v1.PeerInfo.handle_manifests:type_name -> tailbus.v1.PeerInfo.HandleManifestsEntry
+	24, // 4: tailbus.v1.PeerInfo.handle_descriptions:type_name -> tailbus.v1.PeerInfo.HandleDescriptionsEntry
+	25, // 5: tailbus.v1.PeerInfo.handle_manifests:type_name -> tailbus.v1.PeerInfo.HandleManifestsEntry
 	5,  // 6: tailbus.v1.LookupHandleResponse.peer:type_name -> tailbus.v1.PeerInfo
-	14, // 7: tailbus.v1.HeartbeatRequest.handle_descriptions:type_name -> tailbus.v1.HeartbeatRequest.HandleDescriptionsEntry
-	15, // 8: tailbus.v1.HeartbeatRequest.handle_manifests:type_name -> tailbus.v1.HeartbeatRequest.HandleManifestsEntry
-	16, // 9: tailbus.v1.RegisterNodeRequest.HandleManifestsEntry.value:type_name -> tailbus.v1.ServiceManifest
-	16, // 10: tailbus.v1.PeerInfo.HandleManifestsEntry.value:type_name -> tailbus.v1.ServiceManifest
-	16, // 11: tailbus.v1.HeartbeatRequest.HandleManifestsEntry.value:type_name -> tailbus.v1.ServiceManifest
-	0,  // 12: tailbus.v1.CoordinationAPI.RegisterNode:input_type -> tailbus.v1.RegisterNodeRequest
-	2,  // 13: tailbus.v1.CoordinationAPI.WatchPeerMap:input_type -> tailbus.v1.WatchPeerMapRequest
-	6,  // 14: tailbus.v1.CoordinationAPI.LookupHandle:input_type -> tailbus.v1.LookupHandleRequest
-	8,  // 15: tailbus.v1.CoordinationAPI.Heartbeat:input_type -> tailbus.v1.HeartbeatRequest
-	1,  // 16: tailbus.v1.CoordinationAPI.RegisterNode:output_type -> tailbus.v1.RegisterNodeResponse
-	3,  // 17: tailbus.v1.CoordinationAPI.WatchPeerMap:output_type -> tailbus.v1.PeerMapUpdate
-	7,  // 18: tailbus.v1.CoordinationAPI.LookupHandle:output_type -> tailbus.v1.LookupHandleResponse
-	9,  // 19: tailbus.v1.CoordinationAPI.Heartbeat:output_type -> tailbus.v1.HeartbeatResponse
-	16, // [16:20] is the sub-list for method output_type
-	12, // [12:16] is the sub-list for method input_type
-	12, // [12:12] is the sub-list for extension type_name
-	12, // [12:12] is the sub-list for extension extendee
-	0,  // [0:12] is the sub-list for field type_name
+	26, // 7: tailbus.v1.HeartbeatRequest.handle_descriptions:type_name -> tailbus.v1.HeartbeatRequest.HandleDescriptionsEntry
+	27, // 8: tailbus.v1.HeartbeatRequest.handle_manifests:type_name -> tailbus.v1.HeartbeatRequest.HandleManifestsEntry
+	14, // 9: tailbus.v1.ListTeamsResponse.teams:type_name -> tailbus.v1.TeamInfo
+	17, // 10: tailbus.v1.GetTeamMembersResponse.members:type_name -> tailbus.v1.TeamMember
+	28, // 11: tailbus.v1.RegisterNodeRequest.HandleManifestsEntry.value:type_name -> tailbus.v1.ServiceManifest
+	28, // 12: tailbus.v1.PeerInfo.HandleManifestsEntry.value:type_name -> tailbus.v1.ServiceManifest
+	28, // 13: tailbus.v1.HeartbeatRequest.HandleManifestsEntry.value:type_name -> tailbus.v1.ServiceManifest
+	0,  // 14: tailbus.v1.CoordinationAPI.RegisterNode:input_type -> tailbus.v1.RegisterNodeRequest
+	2,  // 15: tailbus.v1.CoordinationAPI.WatchPeerMap:input_type -> tailbus.v1.WatchPeerMapRequest
+	6,  // 16: tailbus.v1.CoordinationAPI.LookupHandle:input_type -> tailbus.v1.LookupHandleRequest
+	8,  // 17: tailbus.v1.CoordinationAPI.Heartbeat:input_type -> tailbus.v1.HeartbeatRequest
+	10, // 18: tailbus.v1.CoordinationAPI.CreateTeam:input_type -> tailbus.v1.CreateTeamRequest
+	12, // 19: tailbus.v1.CoordinationAPI.ListTeams:input_type -> tailbus.v1.ListTeamsRequest
+	15, // 20: tailbus.v1.CoordinationAPI.GetTeamMembers:input_type -> tailbus.v1.GetTeamMembersRequest
+	18, // 21: tailbus.v1.CoordinationAPI.CreateTeamInvite:input_type -> tailbus.v1.CreateTeamInviteRequest
+	20, // 22: tailbus.v1.CoordinationAPI.AcceptTeamInvite:input_type -> tailbus.v1.AcceptTeamInviteRequest
+	1,  // 23: tailbus.v1.CoordinationAPI.RegisterNode:output_type -> tailbus.v1.RegisterNodeResponse
+	3,  // 24: tailbus.v1.CoordinationAPI.WatchPeerMap:output_type -> tailbus.v1.PeerMapUpdate
+	7,  // 25: tailbus.v1.CoordinationAPI.LookupHandle:output_type -> tailbus.v1.LookupHandleResponse
+	9,  // 26: tailbus.v1.CoordinationAPI.Heartbeat:output_type -> tailbus.v1.HeartbeatResponse
+	11, // 27: tailbus.v1.CoordinationAPI.CreateTeam:output_type -> tailbus.v1.CreateTeamResponse
+	13, // 28: tailbus.v1.CoordinationAPI.ListTeams:output_type -> tailbus.v1.ListTeamsResponse
+	16, // 29: tailbus.v1.CoordinationAPI.GetTeamMembers:output_type -> tailbus.v1.GetTeamMembersResponse
+	19, // 30: tailbus.v1.CoordinationAPI.CreateTeamInvite:output_type -> tailbus.v1.CreateTeamInviteResponse
+	21, // 31: tailbus.v1.CoordinationAPI.AcceptTeamInvite:output_type -> tailbus.v1.AcceptTeamInviteResponse
+	23, // [23:32] is the sub-list for method output_type
+	14, // [14:23] is the sub-list for method input_type
+	14, // [14:14] is the sub-list for extension type_name
+	14, // [14:14] is the sub-list for extension extendee
+	0,  // [0:14] is the sub-list for field type_name
 }
 
 func init() { file_tailbus_v1_coord_proto_init() }
@@ -810,7 +1598,7 @@ func file_tailbus_v1_coord_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_tailbus_v1_coord_proto_rawDesc), len(file_tailbus_v1_coord_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   16,
+			NumMessages:   28,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

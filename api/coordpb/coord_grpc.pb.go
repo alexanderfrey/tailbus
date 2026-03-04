@@ -19,10 +19,15 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	CoordinationAPI_RegisterNode_FullMethodName = "/tailbus.v1.CoordinationAPI/RegisterNode"
-	CoordinationAPI_WatchPeerMap_FullMethodName = "/tailbus.v1.CoordinationAPI/WatchPeerMap"
-	CoordinationAPI_LookupHandle_FullMethodName = "/tailbus.v1.CoordinationAPI/LookupHandle"
-	CoordinationAPI_Heartbeat_FullMethodName    = "/tailbus.v1.CoordinationAPI/Heartbeat"
+	CoordinationAPI_RegisterNode_FullMethodName     = "/tailbus.v1.CoordinationAPI/RegisterNode"
+	CoordinationAPI_WatchPeerMap_FullMethodName     = "/tailbus.v1.CoordinationAPI/WatchPeerMap"
+	CoordinationAPI_LookupHandle_FullMethodName     = "/tailbus.v1.CoordinationAPI/LookupHandle"
+	CoordinationAPI_Heartbeat_FullMethodName        = "/tailbus.v1.CoordinationAPI/Heartbeat"
+	CoordinationAPI_CreateTeam_FullMethodName       = "/tailbus.v1.CoordinationAPI/CreateTeam"
+	CoordinationAPI_ListTeams_FullMethodName        = "/tailbus.v1.CoordinationAPI/ListTeams"
+	CoordinationAPI_GetTeamMembers_FullMethodName   = "/tailbus.v1.CoordinationAPI/GetTeamMembers"
+	CoordinationAPI_CreateTeamInvite_FullMethodName = "/tailbus.v1.CoordinationAPI/CreateTeamInvite"
+	CoordinationAPI_AcceptTeamInvite_FullMethodName = "/tailbus.v1.CoordinationAPI/AcceptTeamInvite"
 )
 
 // CoordinationAPIClient is the client API for CoordinationAPI service.
@@ -33,6 +38,11 @@ type CoordinationAPIClient interface {
 	WatchPeerMap(ctx context.Context, in *WatchPeerMapRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[PeerMapUpdate], error)
 	LookupHandle(ctx context.Context, in *LookupHandleRequest, opts ...grpc.CallOption) (*LookupHandleResponse, error)
 	Heartbeat(ctx context.Context, in *HeartbeatRequest, opts ...grpc.CallOption) (*HeartbeatResponse, error)
+	CreateTeam(ctx context.Context, in *CreateTeamRequest, opts ...grpc.CallOption) (*CreateTeamResponse, error)
+	ListTeams(ctx context.Context, in *ListTeamsRequest, opts ...grpc.CallOption) (*ListTeamsResponse, error)
+	GetTeamMembers(ctx context.Context, in *GetTeamMembersRequest, opts ...grpc.CallOption) (*GetTeamMembersResponse, error)
+	CreateTeamInvite(ctx context.Context, in *CreateTeamInviteRequest, opts ...grpc.CallOption) (*CreateTeamInviteResponse, error)
+	AcceptTeamInvite(ctx context.Context, in *AcceptTeamInviteRequest, opts ...grpc.CallOption) (*AcceptTeamInviteResponse, error)
 }
 
 type coordinationAPIClient struct {
@@ -92,6 +102,56 @@ func (c *coordinationAPIClient) Heartbeat(ctx context.Context, in *HeartbeatRequ
 	return out, nil
 }
 
+func (c *coordinationAPIClient) CreateTeam(ctx context.Context, in *CreateTeamRequest, opts ...grpc.CallOption) (*CreateTeamResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(CreateTeamResponse)
+	err := c.cc.Invoke(ctx, CoordinationAPI_CreateTeam_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *coordinationAPIClient) ListTeams(ctx context.Context, in *ListTeamsRequest, opts ...grpc.CallOption) (*ListTeamsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListTeamsResponse)
+	err := c.cc.Invoke(ctx, CoordinationAPI_ListTeams_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *coordinationAPIClient) GetTeamMembers(ctx context.Context, in *GetTeamMembersRequest, opts ...grpc.CallOption) (*GetTeamMembersResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetTeamMembersResponse)
+	err := c.cc.Invoke(ctx, CoordinationAPI_GetTeamMembers_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *coordinationAPIClient) CreateTeamInvite(ctx context.Context, in *CreateTeamInviteRequest, opts ...grpc.CallOption) (*CreateTeamInviteResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(CreateTeamInviteResponse)
+	err := c.cc.Invoke(ctx, CoordinationAPI_CreateTeamInvite_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *coordinationAPIClient) AcceptTeamInvite(ctx context.Context, in *AcceptTeamInviteRequest, opts ...grpc.CallOption) (*AcceptTeamInviteResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(AcceptTeamInviteResponse)
+	err := c.cc.Invoke(ctx, CoordinationAPI_AcceptTeamInvite_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // CoordinationAPIServer is the server API for CoordinationAPI service.
 // All implementations must embed UnimplementedCoordinationAPIServer
 // for forward compatibility.
@@ -100,6 +160,11 @@ type CoordinationAPIServer interface {
 	WatchPeerMap(*WatchPeerMapRequest, grpc.ServerStreamingServer[PeerMapUpdate]) error
 	LookupHandle(context.Context, *LookupHandleRequest) (*LookupHandleResponse, error)
 	Heartbeat(context.Context, *HeartbeatRequest) (*HeartbeatResponse, error)
+	CreateTeam(context.Context, *CreateTeamRequest) (*CreateTeamResponse, error)
+	ListTeams(context.Context, *ListTeamsRequest) (*ListTeamsResponse, error)
+	GetTeamMembers(context.Context, *GetTeamMembersRequest) (*GetTeamMembersResponse, error)
+	CreateTeamInvite(context.Context, *CreateTeamInviteRequest) (*CreateTeamInviteResponse, error)
+	AcceptTeamInvite(context.Context, *AcceptTeamInviteRequest) (*AcceptTeamInviteResponse, error)
 	mustEmbedUnimplementedCoordinationAPIServer()
 }
 
@@ -121,6 +186,21 @@ func (UnimplementedCoordinationAPIServer) LookupHandle(context.Context, *LookupH
 }
 func (UnimplementedCoordinationAPIServer) Heartbeat(context.Context, *HeartbeatRequest) (*HeartbeatResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method Heartbeat not implemented")
+}
+func (UnimplementedCoordinationAPIServer) CreateTeam(context.Context, *CreateTeamRequest) (*CreateTeamResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method CreateTeam not implemented")
+}
+func (UnimplementedCoordinationAPIServer) ListTeams(context.Context, *ListTeamsRequest) (*ListTeamsResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ListTeams not implemented")
+}
+func (UnimplementedCoordinationAPIServer) GetTeamMembers(context.Context, *GetTeamMembersRequest) (*GetTeamMembersResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetTeamMembers not implemented")
+}
+func (UnimplementedCoordinationAPIServer) CreateTeamInvite(context.Context, *CreateTeamInviteRequest) (*CreateTeamInviteResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method CreateTeamInvite not implemented")
+}
+func (UnimplementedCoordinationAPIServer) AcceptTeamInvite(context.Context, *AcceptTeamInviteRequest) (*AcceptTeamInviteResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method AcceptTeamInvite not implemented")
 }
 func (UnimplementedCoordinationAPIServer) mustEmbedUnimplementedCoordinationAPIServer() {}
 func (UnimplementedCoordinationAPIServer) testEmbeddedByValue()                         {}
@@ -208,6 +288,96 @@ func _CoordinationAPI_Heartbeat_Handler(srv interface{}, ctx context.Context, de
 	return interceptor(ctx, in, info, handler)
 }
 
+func _CoordinationAPI_CreateTeam_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(CreateTeamRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(CoordinationAPIServer).CreateTeam(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: CoordinationAPI_CreateTeam_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(CoordinationAPIServer).CreateTeam(ctx, req.(*CreateTeamRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _CoordinationAPI_ListTeams_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListTeamsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(CoordinationAPIServer).ListTeams(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: CoordinationAPI_ListTeams_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(CoordinationAPIServer).ListTeams(ctx, req.(*ListTeamsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _CoordinationAPI_GetTeamMembers_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetTeamMembersRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(CoordinationAPIServer).GetTeamMembers(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: CoordinationAPI_GetTeamMembers_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(CoordinationAPIServer).GetTeamMembers(ctx, req.(*GetTeamMembersRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _CoordinationAPI_CreateTeamInvite_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(CreateTeamInviteRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(CoordinationAPIServer).CreateTeamInvite(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: CoordinationAPI_CreateTeamInvite_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(CoordinationAPIServer).CreateTeamInvite(ctx, req.(*CreateTeamInviteRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _CoordinationAPI_AcceptTeamInvite_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(AcceptTeamInviteRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(CoordinationAPIServer).AcceptTeamInvite(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: CoordinationAPI_AcceptTeamInvite_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(CoordinationAPIServer).AcceptTeamInvite(ctx, req.(*AcceptTeamInviteRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // CoordinationAPI_ServiceDesc is the grpc.ServiceDesc for CoordinationAPI service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -226,6 +396,26 @@ var CoordinationAPI_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "Heartbeat",
 			Handler:    _CoordinationAPI_Heartbeat_Handler,
+		},
+		{
+			MethodName: "CreateTeam",
+			Handler:    _CoordinationAPI_CreateTeam_Handler,
+		},
+		{
+			MethodName: "ListTeams",
+			Handler:    _CoordinationAPI_ListTeams_Handler,
+		},
+		{
+			MethodName: "GetTeamMembers",
+			Handler:    _CoordinationAPI_GetTeamMembers_Handler,
+		},
+		{
+			MethodName: "CreateTeamInvite",
+			Handler:    _CoordinationAPI_CreateTeamInvite_Handler,
+		},
+		{
+			MethodName: "AcceptTeamInvite",
+			Handler:    _CoordinationAPI_AcceptTeamInvite_Handler,
 		},
 	},
 	Streams: []grpc.StreamDesc{

@@ -11,6 +11,11 @@ service CoordinationAPI {
   rpc WatchPeerMap(WatchPeerMapRequest) returns (stream PeerMapUpdate);
   rpc LookupHandle(LookupHandleRequest) returns (LookupHandleResponse);
   rpc Heartbeat(HeartbeatRequest) returns (HeartbeatResponse);
+  rpc CreateTeam(CreateTeamRequest) returns (CreateTeamResponse);
+  rpc ListTeams(ListTeamsRequest) returns (ListTeamsResponse);
+  rpc GetTeamMembers(GetTeamMembersRequest) returns (GetTeamMembersResponse);
+  rpc CreateTeamInvite(CreateTeamInviteRequest) returns (CreateTeamInviteResponse);
+  rpc AcceptTeamInvite(AcceptTeamInviteRequest) returns (AcceptTeamInviteResponse);
 }
 
 message RegisterNodeRequest {
@@ -22,6 +27,7 @@ message RegisterNodeRequest {
   map<string, ServiceManifest> handle_manifests = 6;
   bool is_relay = 7;
   string auth_token = 8;
+  string team_id = 9;
 }
 
 message RegisterNodeResponse {
@@ -29,10 +35,13 @@ message RegisterNodeResponse {
   string error = 2;
   string user_email = 3;
   int64 token_expires_at = 4;
+  string team_id = 5;
+  string team_name = 6;
 }
 
 message WatchPeerMapRequest {
   string node_id = 1;
+  string team_id = 2;
 }
 
 message PeerMapUpdate {
@@ -59,6 +68,7 @@ message PeerInfo {
 
 message LookupHandleRequest {
   string handle = 1;
+  string team_id = 2;
 }
 
 message LookupHandleResponse {
@@ -75,4 +85,71 @@ message HeartbeatRequest {
 
 message HeartbeatResponse {
   bool ok = 1;
+}
+
+// Team management messages
+
+message CreateTeamRequest {
+  string auth_token = 1;
+  string name = 2;
+}
+
+message CreateTeamResponse {
+  string team_id = 1;
+  string name = 2;
+  string error = 3;
+}
+
+message ListTeamsRequest {
+  string auth_token = 1;
+}
+
+message ListTeamsResponse {
+  repeated TeamInfo teams = 1;
+  string error = 2;
+}
+
+message TeamInfo {
+  string team_id = 1;
+  string name = 2;
+  string role = 3;
+}
+
+message GetTeamMembersRequest {
+  string auth_token = 1;
+  string team_id = 2;
+}
+
+message GetTeamMembersResponse {
+  repeated TeamMember members = 1;
+  string error = 2;
+}
+
+message TeamMember {
+  string email = 1;
+  string role = 2;
+}
+
+message CreateTeamInviteRequest {
+  string auth_token = 1;
+  string team_id = 2;
+  int32 max_uses = 3;
+  int64 ttl_seconds = 4;
+}
+
+message CreateTeamInviteResponse {
+  string code = 1;
+  int64 expires_at = 2;
+  string error = 3;
+}
+
+message AcceptTeamInviteRequest {
+  string auth_token = 1;
+  string code = 2;
+}
+
+message AcceptTeamInviteResponse {
+  string team_id = 1;
+  string team_name = 2;
+  string error = 3;
 }

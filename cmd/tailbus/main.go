@@ -54,6 +54,8 @@ func main() {
 		fmt.Println("  login     Authenticate with the coordination server")
 		fmt.Println("  logout    Remove saved credentials")
 		fmt.Println("  status    Show login and connection status")
+		fmt.Println("\nTeam commands:")
+		fmt.Println("  team      Manage teams (create, list, members, invite, join, switch)")
 		fmt.Println("\nMesh commands:")
 		fmt.Println("  register, introspect, list, open, send, subscribe, resolve, sessions, dashboard, trace, agent")
 		os.Exit(1)
@@ -61,6 +63,10 @@ func main() {
 
 	// Handle auth commands before connecting to daemon
 	switch args[0] {
+	case "team":
+		runTeam(args[1:], logger)
+		os.Exit(0)
+
 	case "login":
 		loginFlags := flag.NewFlagSet("login", flag.ExitOnError)
 		coordAddr := loginFlags.String("coord", "coord.tailbus.co:8443", "coordination server address")
@@ -165,6 +171,11 @@ func main() {
 				fmt.Printf("  Token: valid until %s\n", expiry.Format(time.RFC3339))
 			}
 			fmt.Printf("  Credentials: %s\n", credsPath)
+			if creds.TeamID != "" {
+				fmt.Printf("  Team: %s (%s)\n", creds.TeamName, creds.TeamID)
+			} else {
+				fmt.Printf("  Team: (personal mode)\n")
+			}
 		}
 
 		// Check daemon connection

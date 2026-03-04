@@ -45,6 +45,7 @@ type DaemonConfig struct {
 	MCPAddr        string `toml:"mcp_addr"`
 	CredentialFile string `toml:"credential_file"`
 	OAuthURL       string `toml:"oauth_url"`
+	TeamID         string `toml:"team_id"`
 }
 
 // RelayConfig is the configuration for a relay server.

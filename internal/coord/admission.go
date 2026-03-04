@@ -10,7 +10,8 @@ import (
 
 // AdmissionResult holds information from a successful admission check.
 type AdmissionResult struct {
-	Email string // non-empty if authenticated via JWT
+	Email  string // non-empty if authenticated via JWT
+	TeamID string // non-empty if JWT contains team scope
 }
 
 // Admission controls which nodes are allowed to register with the coord server.
@@ -75,8 +76,8 @@ func (a *Admission) ValidateRegistration(authToken, nodeID string) (*AdmissionRe
 			a.logger.Error("failed to bind node to user", "node_id", nodeID, "email", claims.Email, "error", err)
 		}
 
-		a.logger.Info("node admitted via JWT", "node_id", nodeID, "email", claims.Email)
-		return &AdmissionResult{Email: claims.Email}, nil
+		a.logger.Info("node admitted via JWT", "node_id", nodeID, "email", claims.Email, "team_id", claims.TeamID)
+		return &AdmissionResult{Email: claims.Email, TeamID: claims.TeamID}, nil
 	}
 
 	// Pre-shared token path

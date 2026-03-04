@@ -21,7 +21,8 @@ const (
 type Claims struct {
 	jwt.RegisteredClaims
 	Email     string `json:"email"`
-	TokenType string `json:"type"` // "access" or "refresh"
+	TokenType string `json:"type"`              // "access" or "refresh"
+	TeamID    string `json:"team_id,omitempty"`
 }
 
 // JWTIssuer handles issuing and validating tailbus JWTs using HMAC-SHA256.
@@ -95,6 +96,47 @@ func (j *JWTIssuer) Issue(email string) (accessToken, refreshToken string, err e
 	return accessToken, refreshToken, nil
 }
 
+// IssueWithTeam mints tokens scoped to a specific team.
+func (j *JWTIssuer) IssueWithTeam(email, teamID string) (accessToken, refreshToken string, err error) {
+	now := time.Now()
+
+	accessClaims := Claims{
+		RegisteredClaims: jwt.RegisteredClaims{
+			Issuer:    jwtIssuer,
+			Subject:   email,
+			IssuedAt:  jwt.NewNumericDate(now),
+			ExpiresAt: jwt.NewNumericDate(now.Add(accessTokenDuration)),
+		},
+		Email:     email,
+		TokenType: "access",
+		TeamID:    teamID,
+	}
+	at := jwt.NewWithClaims(jwt.SigningMethodHS256, accessClaims)
+	accessToken, err = at.SignedString(j.key)
+	if err != nil {
+		return "", "", fmt.Errorf("sign access token: %w", err)
+	}
+
+	refreshClaims := Claims{
+		RegisteredClaims: jwt.RegisteredClaims{
+			Issuer:    jwtIssuer,
+			Subject:   email,
+			IssuedAt:  jwt.NewNumericDate(now),
+			ExpiresAt: jwt.NewNumericDate(now.Add(refreshTokenDuration)),
+		},
+		Email:     email,
+		TokenType: "refresh",
+		TeamID:    teamID,
+	}
+	rt := jwt.NewWithClaims(jwt.SigningMethodHS256, refreshClaims)
+	refreshToken, err = rt.SignedString(j.key)
+	if err != nil {
+		return "", "", fmt.Errorf("sign refresh token: %w", err)
+	}
+
+	return accessToken, refreshToken, nil
+}
+
 // Validate verifies a token's signature and expiry, returning the claims.
 func (j *JWTIssuer) Validate(tokenString string) (*Claims, error) {
 	token, err := jwt.ParseWithClaims(tokenString, &Claims{}, func(t *jwt.Token) (interface{}, error) {
@@ -123,6 +165,9 @@ func (j *JWTIssuer) Refresh(refreshToken string) (newAccess, newRefresh string, 
 	}
 	if claims.TokenType != "refresh" {
 		return "", "", fmt.Errorf("token is not a refresh token")
+	}
+	if claims.TeamID != "" {
+		return j.IssueWithTeam(claims.Email, claims.TeamID)
 	}
 	return j.Issue(claims.Email)
 }

@@ -12,15 +12,21 @@ import (
 	pb "github.com/alexanderfrey/tailbus/api/coordpb"
 )
 
+// watcherInfo tracks a watcher's channel and team scope.
+type watcherInfo struct {
+	ch     chan *pb.PeerMapUpdate
+	teamID string
+}
+
 // PeerMap builds and distributes peer maps to watching nodes.
 type PeerMap struct {
 	store   *Store
 	logger  *slog.Logger
 	version atomic.Int64
 
-	mu       sync.RWMutex
-	watchers map[string]chan *pb.PeerMapUpdate // node_id -> update channel
-	lastHash string
+	mu        sync.RWMutex
+	watchers  map[string]*watcherInfo // node_id -> watcher info
+	lastHash  map[string]string       // team_id -> last hash ("" key = personal mode)
 }
 
 // NewPeerMap creates a new peer map manager.
@@ -28,7 +34,8 @@ func NewPeerMap(store *Store, logger *slog.Logger) *PeerMap {
 	return &PeerMap{
 		store:    store,
 		logger:   logger,
-		watchers: make(map[string]chan *pb.PeerMapUpdate),
+		watchers: make(map[string]*watcherInfo),
+		lastHash: make(map[string]string),
 	}
 }
 
@@ -108,13 +115,63 @@ func peerHash(peers []*pb.PeerInfo, relays []*pb.RelayInfo) string {
 	return fmt.Sprintf("%x", h.Sum(nil))
 }
 
-// AddWatcher registers a node to receive peer map updates.
-func (pm *PeerMap) AddWatcher(nodeID string) chan *pb.PeerMapUpdate {
+// BuildForTeam reads nodes scoped to a team and creates a PeerMapUpdate.
+// If teamID is empty (personal mode), returns all nodes.
+func (pm *PeerMap) BuildForTeam(teamID string) (*pb.PeerMapUpdate, error) {
+	var nodes []*NodeRecord
+	var err error
+	if teamID == "" {
+		nodes, err = pm.store.GetAllNodes()
+	} else {
+		nodes, err = pm.store.GetNodesByTeam(teamID)
+	}
+	if err != nil {
+		return nil, err
+	}
+
+	var peers []*pb.PeerInfo
+	var relays []*pb.RelayInfo
+	for _, n := range nodes {
+		if n.IsRelay {
+			relays = append(relays, &pb.RelayInfo{
+				NodeId:    n.NodeID,
+				PublicKey: n.PublicKey,
+				Addr:      n.AdvertiseAddr,
+			})
+			continue
+		}
+		descs := make(map[string]string, len(n.HandleManifests))
+		for h, m := range n.HandleManifests {
+			if m != nil && m.Description != "" {
+				descs[h] = m.Description
+			}
+		}
+		peers = append(peers, &pb.PeerInfo{
+			NodeId:             n.NodeID,
+			PublicKey:          n.PublicKey,
+			AdvertiseAddr:      n.AdvertiseAddr,
+			Handles:            n.Handles,
+			LastHeartbeatUnix:  n.LastHeartbeat.Unix(),
+			HandleDescriptions: descs,
+			HandleManifests:    n.HandleManifests,
+		})
+	}
+
+	ver := pm.version.Add(1)
+	return &pb.PeerMapUpdate{
+		Peers:   peers,
+		Relays:  relays,
+		Version: ver,
+	}, nil
+}
+
+// AddWatcher registers a node to receive peer map updates scoped to a team.
+func (pm *PeerMap) AddWatcher(nodeID string, teamID string) chan *pb.PeerMapUpdate {
 	pm.mu.Lock()
 	defer pm.mu.Unlock()
 	ch := make(chan *pb.PeerMapUpdate, 8)
-	pm.watchers[nodeID] = ch
-	pm.logger.Info("watcher added", "node_id", nodeID)
+	pm.watchers[nodeID] = &watcherInfo{ch: ch, teamID: teamID}
+	pm.logger.Info("watcher added", "node_id", nodeID, "team_id", teamID)
 	return ch
 }
 
@@ -122,36 +179,56 @@ func (pm *PeerMap) AddWatcher(nodeID string) chan *pb.PeerMapUpdate {
 func (pm *PeerMap) RemoveWatcher(nodeID string) {
 	pm.mu.Lock()
 	defer pm.mu.Unlock()
-	if ch, ok := pm.watchers[nodeID]; ok {
-		close(ch)
+	if w, ok := pm.watchers[nodeID]; ok {
+		close(w.ch)
 		delete(pm.watchers, nodeID)
 		pm.logger.Info("watcher removed", "node_id", nodeID)
 	}
 }
 
-// Broadcast builds a peer map update and sends it to all watchers only if the
-// topology has changed since the last broadcast.
+// Broadcast builds per-team peer map updates and sends to watchers only if
+// the topology has changed for that team since the last broadcast.
 func (pm *PeerMap) Broadcast() error {
-	update, err := pm.Build()
-	if err != nil {
-		return err
+	pm.mu.RLock()
+	// Collect unique team IDs from watchers
+	teamIDs := make(map[string]struct{})
+	for _, w := range pm.watchers {
+		teamIDs[w.teamID] = struct{}{}
 	}
+	pm.mu.RUnlock()
 
-	hash := peerHash(update.Peers, update.Relays)
+	// Build one update per unique team
+	updates := make(map[string]*pb.PeerMapUpdate)
+	hashes := make(map[string]string)
+	for tid := range teamIDs {
+		update, err := pm.BuildForTeam(tid)
+		if err != nil {
+			return err
+		}
+		updates[tid] = update
+		hashes[tid] = peerHash(update.Peers, update.Relays)
+	}
 
 	pm.mu.Lock()
-	if hash == pm.lastHash {
-		pm.mu.Unlock()
-		return nil
+	// Determine which teams actually changed
+	changed := make(map[string]bool)
+	for tid, hash := range hashes {
+		if hash != pm.lastHash[tid] {
+			pm.lastHash[tid] = hash
+			changed[tid] = true
+		}
 	}
-	pm.lastHash = hash
 	pm.mu.Unlock()
 
 	pm.mu.RLock()
 	defer pm.mu.RUnlock()
-	for nodeID, ch := range pm.watchers {
+	for nodeID, w := range pm.watchers {
+		if !changed[w.teamID] {
+			continue
+		}
+		update := updates[w.teamID]
 		select {
-		case ch <- update:
+		case w.ch <- update:
 		default:
 			pm.logger.Warn("watcher channel full, dropping update", "node_id", nodeID)
 		}
@@ -162,22 +239,32 @@ func (pm *PeerMap) Broadcast() error {
 // ForceBroadcast sends a peer map update unconditionally (bypasses hash check).
 // Used by the reaper when it knows data has changed.
 func (pm *PeerMap) ForceBroadcast() error {
-	update, err := pm.Build()
-	if err != nil {
-		return err
+	pm.mu.RLock()
+	teamIDs := make(map[string]struct{})
+	for _, w := range pm.watchers {
+		teamIDs[w.teamID] = struct{}{}
 	}
+	pm.mu.RUnlock()
 
-	// Update the hash so subsequent Broadcast() calls see the new state
-	hash := peerHash(update.Peers, update.Relays)
-	pm.mu.Lock()
-	pm.lastHash = hash
-	pm.mu.Unlock()
+	updates := make(map[string]*pb.PeerMapUpdate)
+	for tid := range teamIDs {
+		update, err := pm.BuildForTeam(tid)
+		if err != nil {
+			return err
+		}
+		updates[tid] = update
+		hash := peerHash(update.Peers, update.Relays)
+		pm.mu.Lock()
+		pm.lastHash[tid] = hash
+		pm.mu.Unlock()
+	}
 
 	pm.mu.RLock()
 	defer pm.mu.RUnlock()
-	for nodeID, ch := range pm.watchers {
+	for nodeID, w := range pm.watchers {
+		update := updates[w.teamID]
 		select {
-		case ch <- update:
+		case w.ch <- update:
 		default:
 			pm.logger.Warn("watcher channel full, dropping update", "node_id", nodeID)
 		}

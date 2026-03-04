@@ -19,6 +19,7 @@ type NodeRecord struct {
 	HandleManifests map[string]*messagepb.ServiceManifest
 	LastHeartbeat   time.Time
 	IsRelay         bool
+	TeamID          string
 }
 
 // Store provides SQLite persistence for the coordination server.
@@ -49,10 +50,11 @@ func (s *Store) migrate() error {
 			last_heartbeat INTEGER NOT NULL
 		);
 		CREATE TABLE IF NOT EXISTS handles (
-			handle TEXT PRIMARY KEY,
+			handle TEXT NOT NULL,
 			node_id TEXT NOT NULL REFERENCES nodes(node_id) ON DELETE CASCADE,
 			description TEXT NOT NULL DEFAULT '',
-			manifest TEXT NOT NULL DEFAULT '{}'
+			manifest TEXT NOT NULL DEFAULT '{}',
+			PRIMARY KEY (handle, node_id)
 		);
 	`)
 	if err != nil {
@@ -94,6 +96,62 @@ func (s *Store) migrate() error {
 		return fmt.Errorf("create users tables: %w", err)
 	}
 
+	// Team tables
+	_, err = s.db.Exec(`
+		CREATE TABLE IF NOT EXISTS teams (
+			team_id TEXT PRIMARY KEY,
+			name TEXT NOT NULL UNIQUE,
+			created_by TEXT NOT NULL,
+			created_at INTEGER NOT NULL
+		);
+		CREATE TABLE IF NOT EXISTS team_members (
+			team_id TEXT NOT NULL REFERENCES teams(team_id) ON DELETE CASCADE,
+			email TEXT NOT NULL,
+			role TEXT NOT NULL DEFAULT 'member',
+			joined_at INTEGER NOT NULL,
+			PRIMARY KEY (team_id, email)
+		);
+		CREATE TABLE IF NOT EXISTS team_invites (
+			code TEXT PRIMARY KEY,
+			team_id TEXT NOT NULL REFERENCES teams(team_id) ON DELETE CASCADE,
+			created_by TEXT NOT NULL,
+			created_at INTEGER NOT NULL,
+			expires_at INTEGER NOT NULL,
+			max_uses INTEGER NOT NULL DEFAULT 1,
+			use_count INTEGER NOT NULL DEFAULT 0
+		);
+	`)
+	if err != nil {
+		return fmt.Errorf("create team tables: %w", err)
+	}
+	s.db.Exec("ALTER TABLE nodes ADD COLUMN team_id TEXT NOT NULL DEFAULT ''")
+
+	// Migrate handles table to support team-scoped handles (same handle name in
+	// different teams). Old schema: handle TEXT PRIMARY KEY (globally unique).
+	// New schema: PRIMARY KEY (handle, node_id) allows duplicate handle names
+	// across different nodes/teams.
+	var handlePKCols int
+	row := s.db.QueryRow(`
+		SELECT COUNT(*) FROM pragma_table_info('handles')
+		WHERE pk > 0
+	`)
+	_ = row.Scan(&handlePKCols)
+	if handlePKCols == 1 {
+		// Single-column PK (old schema) — migrate to composite PK
+		s.db.Exec(`
+			CREATE TABLE IF NOT EXISTS handles_new (
+				handle TEXT NOT NULL,
+				node_id TEXT NOT NULL REFERENCES nodes(node_id) ON DELETE CASCADE,
+				description TEXT NOT NULL DEFAULT '',
+				manifest TEXT NOT NULL DEFAULT '{}',
+				PRIMARY KEY (handle, node_id)
+			);
+			INSERT OR IGNORE INTO handles_new SELECT handle, node_id, description, manifest FROM handles;
+			DROP TABLE handles;
+			ALTER TABLE handles_new RENAME TO handles;
+		`)
+	}
+
 	return nil
 }
 
@@ -132,14 +190,15 @@ func (s *Store) UpsertNode(rec *NodeRecord) error {
 		isRelay = 1
 	}
 	_, err = tx.Exec(`
-		INSERT INTO nodes (node_id, public_key, advertise_addr, last_heartbeat, is_relay)
-		VALUES (?, ?, ?, ?, ?)
+		INSERT INTO nodes (node_id, public_key, advertise_addr, last_heartbeat, is_relay, team_id)
+		VALUES (?, ?, ?, ?, ?, ?)
 		ON CONFLICT(node_id) DO UPDATE SET
 			public_key = excluded.public_key,
 			advertise_addr = excluded.advertise_addr,
 			last_heartbeat = excluded.last_heartbeat,
-			is_relay = excluded.is_relay
-	`, rec.NodeID, rec.PublicKey, rec.AdvertiseAddr, rec.LastHeartbeat.Unix(), isRelay)
+			is_relay = excluded.is_relay,
+			team_id = excluded.team_id
+	`, rec.NodeID, rec.PublicKey, rec.AdvertiseAddr, rec.LastHeartbeat.Unix(), isRelay, rec.TeamID)
 	if err != nil {
 		return err
 	}
@@ -213,7 +272,7 @@ func (s *Store) UpdateHeartbeat(nodeID string, handles []string, manifests map[s
 
 // GetAllNodes returns all registered nodes with their handles.
 func (s *Store) GetAllNodes() ([]*NodeRecord, error) {
-	rows, err := s.db.Query("SELECT node_id, public_key, advertise_addr, last_heartbeat, is_relay FROM nodes")
+	rows, err := s.db.Query("SELECT node_id, public_key, advertise_addr, last_heartbeat, is_relay, team_id FROM nodes")
 	if err != nil {
 		return nil, err
 	}
@@ -225,7 +284,7 @@ func (s *Store) GetAllNodes() ([]*NodeRecord, error) {
 		var rec NodeRecord
 		var ts int64
 		var isRelay int
-		if err := rows.Scan(&rec.NodeID, &rec.PublicKey, &rec.AdvertiseAddr, &ts, &isRelay); err != nil {
+		if err := rows.Scan(&rec.NodeID, &rec.PublicKey, &rec.AdvertiseAddr, &ts, &isRelay, &rec.TeamID); err != nil {
 			return nil, err
 		}
 		rec.LastHeartbeat = time.Unix(ts, 0)
@@ -443,6 +502,284 @@ func (s *Store) ListUserNodes(email string) ([]string, error) {
 		nodes = append(nodes, nodeID)
 	}
 	return nodes, nil
+}
+
+// CreateTeam creates a new team with the given creator as owner.
+func (s *Store) CreateTeam(teamID, name, email string) error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	now := time.Now().Unix()
+	_, err = tx.Exec("INSERT INTO teams (team_id, name, created_by, created_at) VALUES (?, ?, ?, ?)",
+		teamID, name, email, now)
+	if err != nil {
+		return fmt.Errorf("create team: %w", err)
+	}
+	_, err = tx.Exec("INSERT INTO team_members (team_id, email, role, joined_at) VALUES (?, ?, 'owner', ?)",
+		teamID, email, now)
+	if err != nil {
+		return fmt.Errorf("add team owner: %w", err)
+	}
+	return tx.Commit()
+}
+
+// GetTeamByName returns a team's ID and creator by name.
+func (s *Store) GetTeamByName(name string) (teamID, createdBy string, err error) {
+	err = s.db.QueryRow("SELECT team_id, created_by FROM teams WHERE name = ?", name).Scan(&teamID, &createdBy)
+	if err == sql.ErrNoRows {
+		return "", "", nil
+	}
+	return
+}
+
+// ListUserTeams returns all teams a user is a member of.
+func (s *Store) ListUserTeams(email string) ([]struct {
+	TeamID string
+	Name   string
+	Role   string
+}, error) {
+	rows, err := s.db.Query(`
+		SELECT t.team_id, t.name, tm.role
+		FROM teams t JOIN team_members tm ON t.team_id = tm.team_id
+		WHERE tm.email = ?
+		ORDER BY t.name
+	`, email)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var teams []struct {
+		TeamID string
+		Name   string
+		Role   string
+	}
+	for rows.Next() {
+		var t struct {
+			TeamID string
+			Name   string
+			Role   string
+		}
+		if err := rows.Scan(&t.TeamID, &t.Name, &t.Role); err != nil {
+			return nil, err
+		}
+		teams = append(teams, t)
+	}
+	return teams, nil
+}
+
+// AddTeamMember adds a user as a member of a team.
+func (s *Store) AddTeamMember(teamID, email, role string) error {
+	_, err := s.db.Exec(`
+		INSERT INTO team_members (team_id, email, role, joined_at)
+		VALUES (?, ?, ?, ?)
+		ON CONFLICT(team_id, email) DO UPDATE SET role = excluded.role
+	`, teamID, email, role, time.Now().Unix())
+	return err
+}
+
+// GetTeamMembers returns all members of a team.
+func (s *Store) GetTeamMembers(teamID string) ([]struct {
+	Email string
+	Role  string
+}, error) {
+	rows, err := s.db.Query("SELECT email, role FROM team_members WHERE team_id = ? ORDER BY email", teamID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var members []struct {
+		Email string
+		Role  string
+	}
+	for rows.Next() {
+		var m struct {
+			Email string
+			Role  string
+		}
+		if err := rows.Scan(&m.Email, &m.Role); err != nil {
+			return nil, err
+		}
+		members = append(members, m)
+	}
+	return members, nil
+}
+
+// GetUserTeamRole returns the role of a user in a team, or "" if not a member.
+func (s *Store) GetUserTeamRole(teamID, email string) (string, error) {
+	var role string
+	err := s.db.QueryRow("SELECT role FROM team_members WHERE team_id = ? AND email = ?", teamID, email).Scan(&role)
+	if err == sql.ErrNoRows {
+		return "", nil
+	}
+	return role, err
+}
+
+// CreateTeamInvite creates an invite code for a team.
+func (s *Store) CreateTeamInvite(code, teamID, email string, expiresAt time.Time, maxUses int) error {
+	_, err := s.db.Exec(`
+		INSERT INTO team_invites (code, team_id, created_by, created_at, expires_at, max_uses)
+		VALUES (?, ?, ?, ?, ?, ?)
+	`, code, teamID, email, time.Now().Unix(), expiresAt.Unix(), maxUses)
+	return err
+}
+
+// ConsumeTeamInvite validates and consumes an invite code. Returns the team_id if valid.
+func (s *Store) ConsumeTeamInvite(code string) (string, error) {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return "", err
+	}
+	defer tx.Rollback()
+
+	var teamID string
+	var expiresAt int64
+	var maxUses, useCount int
+	err = tx.QueryRow(
+		"SELECT team_id, expires_at, max_uses, use_count FROM team_invites WHERE code = ?", code,
+	).Scan(&teamID, &expiresAt, &maxUses, &useCount)
+	if err == sql.ErrNoRows {
+		return "", fmt.Errorf("invalid invite code")
+	}
+	if err != nil {
+		return "", err
+	}
+
+	if time.Now().Unix() > expiresAt {
+		return "", fmt.Errorf("invite code has expired")
+	}
+	if useCount >= maxUses {
+		return "", fmt.Errorf("invite code has reached max uses")
+	}
+
+	_, err = tx.Exec("UPDATE team_invites SET use_count = use_count + 1 WHERE code = ?", code)
+	if err != nil {
+		return "", err
+	}
+
+	return teamID, tx.Commit()
+}
+
+// GetNodesByTeam returns nodes belonging to a team plus all relay nodes.
+func (s *Store) GetNodesByTeam(teamID string) ([]*NodeRecord, error) {
+	rows, err := s.db.Query(
+		"SELECT node_id, public_key, advertise_addr, last_heartbeat, is_relay, team_id FROM nodes WHERE team_id = ? OR is_relay = 1",
+		teamID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	nodeMap := make(map[string]*NodeRecord)
+	var nodes []*NodeRecord
+	for rows.Next() {
+		var rec NodeRecord
+		var ts int64
+		var isRelay int
+		if err := rows.Scan(&rec.NodeID, &rec.PublicKey, &rec.AdvertiseAddr, &ts, &isRelay, &rec.TeamID); err != nil {
+			return nil, err
+		}
+		rec.LastHeartbeat = time.Unix(ts, 0)
+		rec.IsRelay = isRelay != 0
+		nodeMap[rec.NodeID] = &rec
+		nodes = append(nodes, &rec)
+	}
+
+	// Load handles for these nodes
+	if len(nodeMap) == 0 {
+		return nodes, nil
+	}
+	hrows, err := s.db.Query("SELECT handle, node_id, description, manifest FROM handles")
+	if err != nil {
+		return nil, err
+	}
+	defer hrows.Close()
+	for hrows.Next() {
+		var h, nodeID, desc, manifestJSON string
+		if err := hrows.Scan(&h, &nodeID, &desc, &manifestJSON); err != nil {
+			return nil, err
+		}
+		if rec, ok := nodeMap[nodeID]; ok {
+			rec.Handles = append(rec.Handles, h)
+			m := unmarshalManifest(manifestJSON)
+			if m == nil && desc != "" {
+				m = &messagepb.ServiceManifest{Description: desc}
+			}
+			if m != nil {
+				if rec.HandleManifests == nil {
+					rec.HandleManifests = make(map[string]*messagepb.ServiceManifest)
+				}
+				rec.HandleManifests[h] = m
+			}
+		}
+	}
+
+	return nodes, nil
+}
+
+// SetNodeTeam updates the team_id for a node.
+func (s *Store) SetNodeTeam(nodeID, teamID string) error {
+	_, err := s.db.Exec("UPDATE nodes SET team_id = ? WHERE node_id = ?", teamID, nodeID)
+	return err
+}
+
+// LookupHandleInTeam finds which node serves a handle within a team scope.
+// If teamID is empty, searches all nodes (personal mode).
+func (s *Store) LookupHandleInTeam(handle, teamID string) (*NodeRecord, error) {
+	if teamID == "" {
+		return s.LookupHandle(handle)
+	}
+
+	var nodeID string
+	err := s.db.QueryRow(`
+		SELECT h.node_id FROM handles h
+		JOIN nodes n ON h.node_id = n.node_id
+		WHERE h.handle = ? AND n.team_id = ?
+	`, handle, teamID).Scan(&nodeID)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+
+	var rec NodeRecord
+	var ts int64
+	var isRelay int
+	err = s.db.QueryRow(
+		"SELECT node_id, public_key, advertise_addr, last_heartbeat, is_relay, team_id FROM nodes WHERE node_id = ?",
+		nodeID,
+	).Scan(&rec.NodeID, &rec.PublicKey, &rec.AdvertiseAddr, &ts, &isRelay, &rec.TeamID)
+	if err != nil {
+		return nil, err
+	}
+	rec.LastHeartbeat = time.Unix(ts, 0)
+	rec.IsRelay = isRelay != 0
+
+	hrows, err := s.db.Query("SELECT handle, manifest FROM handles WHERE node_id = ?", nodeID)
+	if err != nil {
+		return nil, err
+	}
+	defer hrows.Close()
+	for hrows.Next() {
+		var h, manifestJSON string
+		if err := hrows.Scan(&h, &manifestJSON); err != nil {
+			return nil, err
+		}
+		rec.Handles = append(rec.Handles, h)
+		m := unmarshalManifest(manifestJSON)
+		if m != nil {
+			if rec.HandleManifests == nil {
+				rec.HandleManifests = make(map[string]*messagepb.ServiceManifest)
+			}
+			rec.HandleManifests[h] = m
+		}
+	}
+
+	return &rec, nil
 }
 
 // Close closes the database.

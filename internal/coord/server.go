@@ -2,6 +2,7 @@ package coord
 
 import (
 	"context"
+	"crypto/rand"
 	"crypto/tls"
 	"crypto/x509"
 	"fmt"
@@ -162,13 +163,37 @@ func (s *Server) RegisterNode(_ context.Context, req *pb.RegisterNodeRequest) (*
 		return &pb.RegisterNodeResponse{Ok: false, Error: err.Error()}, nil
 	}
 
+	// Resolve team: explicit request > JWT claim > personal mode
+	teamID := req.TeamId
+	if teamID == "" && result != nil {
+		teamID = result.TeamID
+	}
+
+	// If team specified, verify user is a member
+	if teamID != "" && result != nil && result.Email != "" {
+		role, err := s.store.GetUserTeamRole(teamID, result.Email)
+		if err != nil {
+			return &pb.RegisterNodeResponse{Ok: false, Error: fmt.Sprintf("team lookup failed: %v", err)}, nil
+		}
+		if role == "" {
+			return &pb.RegisterNodeResponse{Ok: false, Error: fmt.Sprintf("not a member of team %q", teamID)}, nil
+		}
+	}
+
 	manifests := req.HandleManifests
 	if len(manifests) == 0 {
 		manifests = synthesizeManifests(req.HandleDescriptions)
 	}
 
-	if err := s.registry.RegisterNode(req.NodeId, req.PublicKey, req.AdvertiseAddr, req.Handles, manifests, req.IsRelay); err != nil {
+	if err := s.registry.RegisterNode(req.NodeId, req.PublicKey, req.AdvertiseAddr, req.Handles, manifests, req.IsRelay, teamID); err != nil {
 		return &pb.RegisterNodeResponse{Ok: false, Error: err.Error()}, nil
+	}
+
+	// Set node team in DB
+	if teamID != "" {
+		if err := s.store.SetNodeTeam(req.NodeId, teamID); err != nil {
+			s.logger.Error("failed to set node team", "error", err)
+		}
 	}
 
 	// Broadcast updated peer map to all watchers
@@ -176,18 +201,46 @@ func (s *Server) RegisterNode(_ context.Context, req *pb.RegisterNodeRequest) (*
 		s.logger.Error("failed to broadcast peer map", "error", err)
 	}
 
-	resp := &pb.RegisterNodeResponse{Ok: true}
+	resp := &pb.RegisterNodeResponse{Ok: true, TeamId: teamID}
 	if result != nil && result.Email != "" {
 		resp.UserEmail = result.Email
+	}
+
+	// Resolve team name for response
+	if teamID != "" {
+		if _, name, _ := s.resolveTeamName(teamID); name != "" {
+			resp.TeamName = name
+		}
 	}
 
 	return resp, nil
 }
 
+// resolveTeamName looks up team name by ID. Returns teamID, name, error.
+func (s *Server) resolveTeamName(teamID string) (string, string, error) {
+	var name string
+	err := s.store.db.QueryRow("SELECT name FROM teams WHERE team_id = ?", teamID).Scan(&name)
+	if err != nil {
+		return teamID, "", err
+	}
+	return teamID, name, nil
+}
+
 // WatchPeerMap streams peer map updates to a node.
 func (s *Server) WatchPeerMap(req *pb.WatchPeerMapRequest, stream pb.CoordinationAPI_WatchPeerMapServer) error {
-	// Send current peer map immediately
-	current, err := s.peerMap.Build()
+	// Look up node's team from DB (belt-and-suspenders: don't trust client claim)
+	teamID := req.TeamId
+	if teamID == "" {
+		// Fall back to stored team for the node
+		var storedTeam string
+		_ = s.store.db.QueryRow("SELECT team_id FROM nodes WHERE node_id = ?", req.NodeId).Scan(&storedTeam)
+		if storedTeam != "" {
+			teamID = storedTeam
+		}
+	}
+
+	// Send current peer map immediately (team-scoped)
+	current, err := s.peerMap.BuildForTeam(teamID)
 	if err != nil {
 		return fmt.Errorf("build peer map: %w", err)
 	}
@@ -195,8 +248,8 @@ func (s *Server) WatchPeerMap(req *pb.WatchPeerMapRequest, stream pb.Coordinatio
 		return err
 	}
 
-	// Watch for updates
-	ch := s.peerMap.AddWatcher(req.NodeId)
+	// Watch for updates (team-scoped)
+	ch := s.peerMap.AddWatcher(req.NodeId, teamID)
 	defer s.peerMap.RemoveWatcher(req.NodeId)
 
 	for {
@@ -214,9 +267,9 @@ func (s *Server) WatchPeerMap(req *pb.WatchPeerMapRequest, stream pb.Coordinatio
 	}
 }
 
-// LookupHandle looks up which node serves a handle.
+// LookupHandle looks up which node serves a handle, scoped by team.
 func (s *Server) LookupHandle(_ context.Context, req *pb.LookupHandleRequest) (*pb.LookupHandleResponse, error) {
-	rec, err := s.registry.LookupHandle(req.Handle)
+	rec, err := s.store.LookupHandleInTeam(req.Handle, req.TeamId)
 	if err != nil {
 		return nil, err
 	}
@@ -263,4 +316,152 @@ func (s *Server) Heartbeat(_ context.Context, req *pb.HeartbeatRequest) (*pb.Hea
 	}
 
 	return &pb.HeartbeatResponse{Ok: true}, nil
+}
+
+// validateJWT validates a JWT auth token and returns the claims.
+func (s *Server) validateJWT(authToken string) (*Claims, error) {
+	if s.jwtIssuer == nil {
+		return nil, fmt.Errorf("JWT not configured on this server")
+	}
+	claims, err := s.jwtIssuer.Validate(authToken)
+	if err != nil {
+		return nil, fmt.Errorf("invalid auth token: %w", err)
+	}
+	if claims.TokenType != "access" {
+		return nil, fmt.Errorf("expected access token, got %s", claims.TokenType)
+	}
+	return claims, nil
+}
+
+// CreateTeam creates a new team and makes the caller the owner.
+func (s *Server) CreateTeam(_ context.Context, req *pb.CreateTeamRequest) (*pb.CreateTeamResponse, error) {
+	claims, err := s.validateJWT(req.AuthToken)
+	if err != nil {
+		return &pb.CreateTeamResponse{Error: err.Error()}, nil
+	}
+
+	teamID := generateID(8)
+	if err := s.store.CreateTeam(teamID, req.Name, claims.Email); err != nil {
+		return &pb.CreateTeamResponse{Error: fmt.Sprintf("create team: %v", err)}, nil
+	}
+
+	s.logger.Info("team created", "team_id", teamID, "name", req.Name, "owner", claims.Email)
+	return &pb.CreateTeamResponse{TeamId: teamID, Name: req.Name}, nil
+}
+
+// ListTeams returns teams the caller is a member of.
+func (s *Server) ListTeams(_ context.Context, req *pb.ListTeamsRequest) (*pb.ListTeamsResponse, error) {
+	claims, err := s.validateJWT(req.AuthToken)
+	if err != nil {
+		return &pb.ListTeamsResponse{Error: err.Error()}, nil
+	}
+
+	teams, err := s.store.ListUserTeams(claims.Email)
+	if err != nil {
+		return &pb.ListTeamsResponse{Error: fmt.Sprintf("list teams: %v", err)}, nil
+	}
+
+	var infos []*pb.TeamInfo
+	for _, t := range teams {
+		infos = append(infos, &pb.TeamInfo{
+			TeamId: t.TeamID,
+			Name:   t.Name,
+			Role:   t.Role,
+		})
+	}
+	return &pb.ListTeamsResponse{Teams: infos}, nil
+}
+
+// GetTeamMembers returns the members of a team.
+func (s *Server) GetTeamMembers(_ context.Context, req *pb.GetTeamMembersRequest) (*pb.GetTeamMembersResponse, error) {
+	claims, err := s.validateJWT(req.AuthToken)
+	if err != nil {
+		return &pb.GetTeamMembersResponse{Error: err.Error()}, nil
+	}
+
+	// Verify caller is a member
+	role, err := s.store.GetUserTeamRole(req.TeamId, claims.Email)
+	if err != nil {
+		return &pb.GetTeamMembersResponse{Error: fmt.Sprintf("lookup role: %v", err)}, nil
+	}
+	if role == "" {
+		return &pb.GetTeamMembersResponse{Error: "not a member of this team"}, nil
+	}
+
+	members, err := s.store.GetTeamMembers(req.TeamId)
+	if err != nil {
+		return &pb.GetTeamMembersResponse{Error: fmt.Sprintf("get members: %v", err)}, nil
+	}
+
+	var result []*pb.TeamMember
+	for _, m := range members {
+		result = append(result, &pb.TeamMember{
+			Email: m.Email,
+			Role:  m.Role,
+		})
+	}
+	return &pb.GetTeamMembersResponse{Members: result}, nil
+}
+
+// CreateTeamInvite generates an invite code for a team.
+func (s *Server) CreateTeamInvite(_ context.Context, req *pb.CreateTeamInviteRequest) (*pb.CreateTeamInviteResponse, error) {
+	claims, err := s.validateJWT(req.AuthToken)
+	if err != nil {
+		return &pb.CreateTeamInviteResponse{Error: err.Error()}, nil
+	}
+
+	// Verify caller is an owner
+	role, err := s.store.GetUserTeamRole(req.TeamId, claims.Email)
+	if err != nil {
+		return &pb.CreateTeamInviteResponse{Error: fmt.Sprintf("lookup role: %v", err)}, nil
+	}
+	if role != "owner" {
+		return &pb.CreateTeamInviteResponse{Error: "only team owners can create invites"}, nil
+	}
+
+	maxUses := int(req.MaxUses)
+	if maxUses <= 0 {
+		maxUses = 1
+	}
+	ttl := time.Duration(req.TtlSeconds) * time.Second
+	if ttl <= 0 {
+		ttl = 7 * 24 * time.Hour // default 7 days
+	}
+	expiresAt := time.Now().Add(ttl)
+
+	code := generateID(4) + "-" + generateID(4)
+	if err := s.store.CreateTeamInvite(code, req.TeamId, claims.Email, expiresAt, maxUses); err != nil {
+		return &pb.CreateTeamInviteResponse{Error: fmt.Sprintf("create invite: %v", err)}, nil
+	}
+
+	s.logger.Info("team invite created", "team_id", req.TeamId, "code", code, "max_uses", maxUses)
+	return &pb.CreateTeamInviteResponse{Code: code, ExpiresAt: expiresAt.Unix()}, nil
+}
+
+// AcceptTeamInvite consumes an invite code and adds the caller as a team member.
+func (s *Server) AcceptTeamInvite(_ context.Context, req *pb.AcceptTeamInviteRequest) (*pb.AcceptTeamInviteResponse, error) {
+	claims, err := s.validateJWT(req.AuthToken)
+	if err != nil {
+		return &pb.AcceptTeamInviteResponse{Error: err.Error()}, nil
+	}
+
+	teamID, err := s.store.ConsumeTeamInvite(req.Code)
+	if err != nil {
+		return &pb.AcceptTeamInviteResponse{Error: err.Error()}, nil
+	}
+
+	if err := s.store.AddTeamMember(teamID, claims.Email, "member"); err != nil {
+		return &pb.AcceptTeamInviteResponse{Error: fmt.Sprintf("add member: %v", err)}, nil
+	}
+
+	_, teamName, _ := s.resolveTeamName(teamID)
+	s.logger.Info("team invite accepted", "team_id", teamID, "email", claims.Email)
+	return &pb.AcceptTeamInviteResponse{TeamId: teamID, TeamName: teamName}, nil
+}
+
+// generateID generates a random hex string of the given byte length.
+func generateID(byteLen int) string {
+	b := make([]byte, byteLen)
+	_, _ = rand.Read(b)
+	return fmt.Sprintf("%x", b)
 }

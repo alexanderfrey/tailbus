@@ -268,11 +268,18 @@ func (d *Daemon) Run(ctx context.Context) error {
 		return fmt.Errorf("resolve auth: %w", err)
 	}
 
+	// Resolve team ID from config or credentials
+	teamID := d.resolveTeamID()
+
 	// Connect to coord server with mTLS + TOFU
 	coordFPFile := filepath.Join(os.TempDir(), "tailbusd-"+d.cfg.NodeID+".coord-fp")
 	cc, err := NewCoordClient(d.cfg.CoordAddr, d.cfg.NodeID, d.keypair.Public, d.cfg.AdvertiseAddr, d.resolver, d.logger, d.keypair, coordFPFile, authToken)
 	if err != nil {
 		return fmt.Errorf("create coord client: %w", err)
+	}
+	if teamID != "" {
+		cc.SetTeamID(teamID)
+		d.logger.Info("team mode enabled", "team_id", teamID)
 	}
 	d.coordClient = cc
 	defer cc.Close()
@@ -446,4 +453,22 @@ func (d *Daemon) Resolver() *handle.Resolver {
 // Sessions returns the session store.
 func (d *Daemon) Sessions() *session.Store {
 	return d.sessions
+}
+
+// resolveTeamID returns the team ID from config or saved credentials.
+// Priority: 1) explicit TeamID in config, 2) TeamID in saved credentials.
+func (d *Daemon) resolveTeamID() string {
+	if d.cfg.TeamID != "" {
+		return d.cfg.TeamID
+	}
+
+	credsPath := d.cfg.CredentialFile
+	if credsPath == "" {
+		credsPath = auth.DefaultCredentialFile()
+	}
+	creds, err := auth.LoadCredentials(credsPath)
+	if err == nil && creds.TeamID != "" {
+		return creds.TeamID
+	}
+	return ""
 }

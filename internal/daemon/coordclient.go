@@ -24,6 +24,7 @@ type CoordClient struct {
 	pubKey        []byte
 	addr          string
 	authToken     string
+	teamID        string
 	isRelay       bool
 	logger        *slog.Logger
 	resolver      *handle.Resolver
@@ -75,6 +76,11 @@ func (c *CoordClient) SetIsRelay(isRelay bool) {
 	c.isRelay = isRelay
 }
 
+// SetTeamID sets the team ID for registration and peer map requests.
+func (c *CoordClient) SetTeamID(teamID string) {
+	c.teamID = teamID
+}
+
 // SetOnRelayUpdate sets a callback invoked after relay info is updated from the peer map.
 func (c *CoordClient) SetOnRelayUpdate(fn func()) {
 	c.onRelayUpdate = fn
@@ -104,6 +110,7 @@ func (c *CoordClient) Register(ctx context.Context, handles []string, manifests 
 		HandleManifests:    manifests,
 		IsRelay:            c.isRelay,
 		AuthToken:          c.authToken,
+		TeamId:             c.teamID,
 	})
 	if err != nil {
 		return fmt.Errorf("register node: %w", err)
@@ -118,7 +125,7 @@ func (c *CoordClient) Register(ctx context.Context, handles []string, manifests 
 // WatchPeerMap starts watching for peer map updates and updating the resolver.
 // Blocks until the context is cancelled.
 func (c *CoordClient) WatchPeerMap(ctx context.Context) error {
-	stream, err := c.client.WatchPeerMap(ctx, &pb.WatchPeerMapRequest{NodeId: c.nodeID})
+	stream, err := c.client.WatchPeerMap(ctx, &pb.WatchPeerMapRequest{NodeId: c.nodeID, TeamId: c.teamID})
 	if err != nil {
 		return fmt.Errorf("watch peer map: %w", err)
 	}
