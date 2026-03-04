@@ -1,0 +1,15 @@
+[Unit]
+Description=Tailbus daemon
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=%h/.local/bin/tailbusd
+Restart=on-failure
+RestartSec=5
+StandardOutput=append:%h/.tailbus/tailbusd.log
+StandardError=append:%h/.tailbus/tailbusd.log
+
+[Install]
+WantedBy=default.target

@@ -96,8 +96,109 @@ case ":$PATH:" in
     ;;
 esac
 
-echo "Get started:"
-echo "  tailbusd               # start daemon -> login with Google -> connected"
-echo "  tailbus login          # authenticate without starting daemon"
-echo "  tailbus status         # check connection status"
+# --- Install and enable user service ---
+TAILBUSD_BIN="${INSTALL_DIR}/tailbusd"
+LOG_FILE="${HOME}/.tailbus/tailbusd.log"
+
+if [ "$OS" = "linux" ] && command -v systemctl >/dev/null 2>&1; then
+  UNIT_DIR="${HOME}/.config/systemd/user"
+  UNIT_FILE="${UNIT_DIR}/tailbusd.service"
+  mkdir -p "$UNIT_DIR"
+
+  cat > "$UNIT_FILE" <<UNIT
+[Unit]
+Description=Tailbus daemon
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=${TAILBUSD_BIN}
+Restart=on-failure
+RestartSec=5
+StandardOutput=append:${LOG_FILE}
+StandardError=append:${LOG_FILE}
+
+[Install]
+WantedBy=default.target
+UNIT
+
+  systemctl --user daemon-reload
+  if systemctl --user is-active --quiet tailbusd 2>/dev/null; then
+    echo "Restarting tailbusd service..."
+    systemctl --user restart tailbusd
+  else
+    systemctl --user enable --now tailbusd
+  fi
+  echo "tailbusd service installed and running (systemd user unit)"
+  echo ""
+  echo "Get started:"
+  echo "  tailbus login                          # authenticate with Google"
+  echo "  tailbus status                         # check connection status"
+  echo ""
+  echo "Manage the daemon:"
+  echo "  systemctl --user status tailbusd       # service status"
+  echo "  systemctl --user restart tailbusd      # restart"
+  echo "  systemctl --user stop tailbusd         # stop"
+  echo "  tail -f ~/.tailbus/tailbusd.log        # logs"
+
+elif [ "$OS" = "darwin" ]; then
+  PLIST_DIR="${HOME}/Library/LaunchAgents"
+  PLIST_FILE="${PLIST_DIR}/co.tailbus.daemon.plist"
+  PLIST_LABEL="co.tailbus.daemon"
+  mkdir -p "$PLIST_DIR"
+
+  cat > "$PLIST_FILE" <<PLIST
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>${PLIST_LABEL}</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>${TAILBUSD_BIN}</string>
+    </array>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <dict>
+        <key>SuccessfulExit</key>
+        <false/>
+    </dict>
+    <key>StandardOutPath</key>
+    <string>${LOG_FILE}</string>
+    <key>StandardErrorPath</key>
+    <string>${LOG_FILE}</string>
+    <key>ThrottleInterval</key>
+    <integer>5</integer>
+</dict>
+</plist>
+PLIST
+
+  GUI_UID=$(id -u)
+  # Unload if already loaded (upgrade path)
+  if launchctl print "gui/${GUI_UID}/${PLIST_LABEL}" >/dev/null 2>&1; then
+    echo "Stopping existing tailbusd service..."
+    launchctl bootout "gui/${GUI_UID}/${PLIST_LABEL}" 2>/dev/null || true
+  fi
+  launchctl bootstrap "gui/${GUI_UID}" "$PLIST_FILE"
+  echo "tailbusd service installed and running (launchd)"
+  echo ""
+  echo "Get started:"
+  echo "  tailbus login                          # authenticate with Google"
+  echo "  tailbus status                         # check connection status"
+  echo ""
+  echo "Manage the daemon:"
+  echo "  launchctl list | grep tailbus          # service status"
+  echo "  launchctl kickstart -k gui/\$(id -u)/co.tailbus.daemon   # restart"
+  echo "  launchctl kill TERM gui/\$(id -u)/co.tailbus.daemon      # stop"
+  echo "  tail -f ~/.tailbus/tailbusd.log        # logs"
+
+else
+  echo "Get started:"
+  echo "  tailbusd               # start daemon -> login with Google -> connected"
+  echo "  tailbus login          # authenticate without starting daemon"
+  echo "  tailbus status         # check connection status"
+fi
 echo ""
