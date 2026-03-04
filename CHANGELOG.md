@@ -6,10 +6,20 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [v0.3.0] — 2026-03-04
+
 ### Added
+- **Team management** — teams as the core multi-tenancy unit; team-scoped peer maps, handle lookup, and registration; invite codes with configurable TTL and max uses; CLI `tailbus team` commands (create, list, members, invite, join, switch, remove, role, delete)
+- **REST API** — `/api/v1/` endpoints on coord for teams, members, invites, and nodes with JWT Bearer auth
+- **Browser OAuth flow** — `GET /oauth/login` redirects to Google consent, returns tokens via URL fragment; no separate redirect URI needed
+- **CORS middleware** — configurable `web_app_url` for cross-origin dashboard requests
+- **Team admin dashboard** — web UI at `tailbus.co/dashboard` with Google sign-in, team list, create team, team detail (members table, nodes table, invite generation, role management, delete team)
 - Per-handle health counters in TUI dashboard
 - Mesh topology view in TUI dashboard (ASCII graph + compact mode)
 - Install script now targets `~/.local/bin` with automatic PATH configuration
+- Community governance files (LICENSE, CONTRIBUTING.md, SECURITY.md, issue/PR templates)
+- CI pipeline (golangci-lint, go test with race + codecov, Python SDK tests)
+- PyPI publish via trusted publishing (OIDC) in release pipeline
 
 ## [v0.2.0] — 2025-12-15
 
@@ -43,6 +53,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 - Real-time TUI dashboard
 - Release pipeline and install script
 
-[Unreleased]: https://github.com/alexanderfrey/tailbus/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/alexanderfrey/tailbus/compare/v0.3.0...HEAD
+[v0.3.0]: https://github.com/alexanderfrey/tailbus/compare/v0.2.0...v0.3.0
 [v0.2.0]: https://github.com/alexanderfrey/tailbus/compare/v0.1.0...v0.2.0
 [v0.1.0]: https://github.com/alexanderfrey/tailbus/releases/tag/v0.1.0
