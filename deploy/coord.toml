@@ -2,6 +2,8 @@ listen_addr = ":8443"
 data_dir = "/data"
 external_url = "https://coord.tailbus.co"
 oauth_http_addr = ":8080"
+relay_addr = ":7443"
+relay_advertise_addr = "coord.tailbus.co:7443"
 
 [[oauth_providers]]
 name = "google"
