@@ -75,6 +75,7 @@ type RoomService interface {
 	ListMembers(ctx context.Context, roomID, handle string) ([]string, error)
 	Replay(ctx context.Context, roomID, handle string, sinceSeq uint64) ([]*messagepb.RoomEvent, error)
 	CloseRoom(ctx context.Context, roomID, handle string) (*messagepb.RoomInfo, error)
+	DashboardRooms(handles []string) ([]*messagepb.RoomInfo, error)
 }
 
 // AgentServer is the local gRPC server that agent programs connect to via Unix socket.
@@ -1047,6 +1048,19 @@ func (s *AgentServer) GetNodeStatus(_ context.Context, _ *agentpb.GetNodeStatusR
 		}
 	}
 
+	var rooms []*messagepb.RoomInfo
+	if s.roomManager != nil {
+		localHandles := make([]string, 0, len(handles))
+		for _, h := range handles {
+			localHandles = append(localHandles, h.Name)
+		}
+		var err error
+		rooms, err = s.roomManager.DashboardRooms(localHandles)
+		if err != nil {
+			return nil, err
+		}
+	}
+
 	// Get counters
 	var counters *agentpb.Counters
 	if s.activity != nil {
@@ -1061,6 +1075,7 @@ func (s *AgentServer) GetNodeStatus(_ context.Context, _ *agentpb.GetNodeStatusR
 		Sessions:  sessInfos,
 		Counters:  counters,
 		Relays:    relays,
+		Rooms:     rooms,
 	}, nil
 }
 

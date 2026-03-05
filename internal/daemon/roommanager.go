@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"slices"
+	"sort"
 	"sync"
 	"time"
 
@@ -30,13 +31,14 @@ type RoomManager struct {
 	store       *MessageStore
 	logger      *slog.Logger
 	retention   int
+	activity    *ActivityBus
 
 	mu          sync.Mutex
 	pendingResp map[string]chan *messagepb.RoomCommandResult
 	coord       *CoordClient
 }
 
-func NewRoomManager(nodeID string, resolver *handle.Resolver, tp transport.Transport, deliverer RoomDeliverer, store *MessageStore, logger *slog.Logger) *RoomManager {
+func NewRoomManager(nodeID string, resolver *handle.Resolver, tp transport.Transport, deliverer RoomDeliverer, store *MessageStore, activity *ActivityBus, logger *slog.Logger) *RoomManager {
 	return &RoomManager{
 		nodeID:      nodeID,
 		resolver:    resolver,
@@ -45,6 +47,7 @@ func NewRoomManager(nodeID string, resolver *handle.Resolver, tp transport.Trans
 		store:       store,
 		logger:      logger,
 		retention:   defaultRoomEventRetention,
+		activity:    activity,
 		pendingResp: make(map[string]chan *messagepb.RoomCommandResult),
 	}
 }
@@ -74,6 +77,9 @@ func (rm *RoomManager) CreateRoom(ctx context.Context, creator, title string, in
 		if err := rm.coord.UpsertRoom(ctx, room); err != nil {
 			return nil, err
 		}
+	}
+	if rm.activity != nil {
+		rm.activity.EmitRoomCreated(room.RoomId, room.Title, room.CreatedBy, room.Members)
 	}
 	return room, nil
 }
@@ -173,6 +179,52 @@ func (rm *RoomManager) CloseRoom(ctx context.Context, roomID, handle string) (*m
 		return nil, err
 	}
 	return result.Room, nil
+}
+
+func (rm *RoomManager) DashboardRooms(handles []string) ([]*messagepb.RoomInfo, error) {
+	roomByID := make(map[string]*messagepb.RoomInfo)
+	if rm.store != nil {
+		rooms, err := rm.store.LoadRooms()
+		if err != nil {
+			return nil, err
+		}
+		for _, room := range rooms {
+			if room != nil {
+				roomByID[room.RoomId] = room
+			}
+		}
+	}
+	if rm.resolver != nil {
+		for _, handle := range handles {
+			for _, info := range rm.resolver.ListRoomsForMember(handle) {
+				if _, ok := roomByID[info.RoomID]; ok {
+					continue
+				}
+				roomByID[info.RoomID] = &messagepb.RoomInfo{
+					RoomId:        info.RoomID,
+					Title:         info.Title,
+					CreatedBy:     info.CreatedBy,
+					HomeNodeId:    info.HomeNodeID,
+					Members:       append([]string(nil), info.Members...),
+					Status:        info.Status,
+					NextSeq:       info.NextSeq,
+					CreatedAtUnix: info.CreatedAt,
+					UpdatedAtUnix: info.UpdatedAt,
+				}
+			}
+		}
+	}
+	rooms := make([]*messagepb.RoomInfo, 0, len(roomByID))
+	for _, room := range roomByID {
+		rooms = append(rooms, room)
+	}
+	sort.Slice(rooms, func(i, j int) bool {
+		if rooms[i].UpdatedAtUnix == rooms[j].UpdatedAtUnix {
+			return rooms[i].RoomId < rooms[j].RoomId
+		}
+		return rooms[i].UpdatedAtUnix > rooms[j].UpdatedAtUnix
+	})
+	return rooms, nil
 }
 
 func (rm *RoomManager) HandleTransportMessage(ctx context.Context, msg *transportpb.TransportMessage) {
@@ -423,8 +475,25 @@ func (rm *RoomManager) persistAndPublish(ctx context.Context, room *messagepb.Ro
 			return err
 		}
 	}
+	rm.emitRoomActivity(event)
 	rm.publishEvent(event)
 	return nil
+}
+
+func (rm *RoomManager) emitRoomActivity(event *messagepb.RoomEvent) {
+	if rm.activity == nil || event == nil {
+		return
+	}
+	switch event.Type {
+	case messagepb.RoomEventType_ROOM_EVENT_TYPE_MESSAGE_POSTED:
+		rm.activity.EmitRoomMessagePosted(event.RoomId, event.RoomSeq, event.SenderHandle, event.Members, event.TraceId)
+	case messagepb.RoomEventType_ROOM_EVENT_TYPE_MEMBER_JOINED:
+		rm.activity.EmitRoomMemberJoined(event.RoomId, event.SubjectHandle, event.Members)
+	case messagepb.RoomEventType_ROOM_EVENT_TYPE_MEMBER_LEFT:
+		rm.activity.EmitRoomMemberLeft(event.RoomId, event.SubjectHandle, event.Members)
+	case messagepb.RoomEventType_ROOM_EVENT_TYPE_ROOM_CLOSED:
+		rm.activity.EmitRoomClosed(event.RoomId, event.SenderHandle, event.Members)
+	}
 }
 
 func (rm *RoomManager) publishEvent(event *messagepb.RoomEvent) {

@@ -21,6 +21,11 @@ type ActivityBus struct {
 	MessagesReceivedRemote atomic.Int64
 	SessionsOpened        atomic.Int64
 	SessionsResolved      atomic.Int64
+	RoomsCreated          atomic.Int64
+	RoomMessagesPosted    atomic.Int64
+	RoomMembersJoined     atomic.Int64
+	RoomMembersLeft       atomic.Int64
+	RoomsClosed           atomic.Int64
 }
 
 // NewActivityBus creates a new activity bus.
@@ -70,6 +75,11 @@ func (b *ActivityBus) Counters() *agentpb.Counters {
 		MessagesReceivedRemote: b.MessagesReceivedRemote.Load(),
 		SessionsOpened:        b.SessionsOpened.Load(),
 		SessionsResolved:      b.SessionsResolved.Load(),
+		RoomsCreated:          b.RoomsCreated.Load(),
+		RoomMessagesPosted:    b.RoomMessagesPosted.Load(),
+		RoomMembersJoined:     b.RoomMembersJoined.Load(),
+		RoomMembersLeft:       b.RoomMembersLeft.Load(),
+		RoomsClosed:           b.RoomsClosed.Load(),
 	}
 }
 
@@ -130,6 +140,79 @@ func (b *ActivityBus) EmitHandleRegistered(handle string) {
 		Event: &agentpb.ActivityEvent_HandleRegistered{
 			HandleRegistered: &agentpb.HandleRegisteredEvent{
 				Handle: handle,
+			},
+		},
+	})
+}
+
+func (b *ActivityBus) EmitRoomCreated(roomID, title, createdBy string, members []string) {
+	b.RoomsCreated.Add(1)
+	b.Emit(&agentpb.ActivityEvent{
+		Timestamp: timestamppb.Now(),
+		Event: &agentpb.ActivityEvent_RoomCreated{
+			RoomCreated: &agentpb.RoomCreatedEvent{
+				RoomId:        roomID,
+				Title:         title,
+				CreatedBy:     createdBy,
+				MemberHandles: append([]string(nil), members...),
+			},
+		},
+	})
+}
+
+func (b *ActivityBus) EmitRoomMessagePosted(roomID string, roomSeq uint64, from string, members []string, traceID string) {
+	b.RoomMessagesPosted.Add(1)
+	b.Emit(&agentpb.ActivityEvent{
+		Timestamp: timestamppb.Now(),
+		Event: &agentpb.ActivityEvent_RoomMessagePosted{
+			RoomMessagePosted: &agentpb.RoomMessagePostedEvent{
+				RoomId:        roomID,
+				RoomSeq:       roomSeq,
+				FromHandle:    from,
+				MemberHandles: append([]string(nil), members...),
+				TraceId:       traceID,
+			},
+		},
+	})
+}
+
+func (b *ActivityBus) EmitRoomMemberJoined(roomID, handle string, members []string) {
+	b.RoomMembersJoined.Add(1)
+	b.Emit(&agentpb.ActivityEvent{
+		Timestamp: timestamppb.Now(),
+		Event: &agentpb.ActivityEvent_RoomMemberJoined{
+			RoomMemberJoined: &agentpb.RoomMemberJoinedEvent{
+				RoomId:        roomID,
+				Handle:        handle,
+				MemberHandles: append([]string(nil), members...),
+			},
+		},
+	})
+}
+
+func (b *ActivityBus) EmitRoomMemberLeft(roomID, handle string, members []string) {
+	b.RoomMembersLeft.Add(1)
+	b.Emit(&agentpb.ActivityEvent{
+		Timestamp: timestamppb.Now(),
+		Event: &agentpb.ActivityEvent_RoomMemberLeft{
+			RoomMemberLeft: &agentpb.RoomMemberLeftEvent{
+				RoomId:        roomID,
+				Handle:        handle,
+				MemberHandles: append([]string(nil), members...),
+			},
+		},
+	})
+}
+
+func (b *ActivityBus) EmitRoomClosed(roomID, closedBy string, members []string) {
+	b.RoomsClosed.Add(1)
+	b.Emit(&agentpb.ActivityEvent{
+		Timestamp: timestamppb.Now(),
+		Event: &agentpb.ActivityEvent_RoomClosed{
+			RoomClosed: &agentpb.RoomClosedEvent{
+				RoomId:        roomID,
+				ClosedBy:      closedBy,
+				MemberHandles: append([]string(nil), members...),
 			},
 		},
 	})

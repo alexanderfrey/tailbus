@@ -216,6 +216,7 @@ message GetNodeStatusResponse {
   repeated SessionInfo sessions = 5;
   Counters counters = 6;
   repeated RelayStatus relays = 7;
+  repeated RoomInfo rooms = 8;
 }
 
 message RelayStatus {
@@ -250,6 +251,11 @@ message Counters {
   int64 messages_received_remote = 4;
   int64 sessions_opened = 5;
   int64 sessions_resolved = 6;
+  int64 rooms_created = 7;
+  int64 room_messages_posted = 8;
+  int64 room_members_joined = 9;
+  int64 room_members_left = 10;
+  int64 rooms_closed = 11;
 }
 
 message WatchActivityRequest {}
@@ -261,6 +267,11 @@ message ActivityEvent {
     SessionOpenedEvent session_opened = 3;
     SessionResolvedEvent session_resolved = 4;
     HandleRegisteredEvent handle_registered = 5;
+    RoomCreatedEvent room_created = 6;
+    RoomMessagePostedEvent room_message_posted = 7;
+    RoomMemberJoinedEvent room_member_joined = 8;
+    RoomMemberLeftEvent room_member_left = 9;
+    RoomClosedEvent room_closed = 10;
   }
 }
 
@@ -286,6 +297,39 @@ message SessionResolvedEvent {
 
 message HandleRegisteredEvent {
   string handle = 1;
+}
+
+message RoomCreatedEvent {
+  string room_id = 1;
+  string title = 2;
+  string created_by = 3;
+  repeated string member_handles = 4;
+}
+
+message RoomMessagePostedEvent {
+  string room_id = 1;
+  uint64 room_seq = 2;
+  string from_handle = 3;
+  repeated string member_handles = 4;
+  string trace_id = 5;
+}
+
+message RoomMemberJoinedEvent {
+  string room_id = 1;
+  string handle = 2;
+  repeated string member_handles = 3;
+}
+
+message RoomMemberLeftEvent {
+  string room_id = 1;
+  string handle = 2;
+  repeated string member_handles = 3;
+}
+
+message RoomClosedEvent {
+  string room_id = 1;
+  string closed_by = 2;
+  repeated string member_handles = 3;
 }
 
 // --- Tracing ---

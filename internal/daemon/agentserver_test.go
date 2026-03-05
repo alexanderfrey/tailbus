@@ -9,6 +9,7 @@ import (
 	"time"
 
 	agentpb "github.com/alexanderfrey/tailbus/api/agentpb"
+	messagepb "github.com/alexanderfrey/tailbus/api/messagepb"
 	"github.com/alexanderfrey/tailbus/internal/handle"
 	"github.com/alexanderfrey/tailbus/internal/session"
 	"github.com/alexanderfrey/tailbus/internal/transport"
@@ -52,6 +53,39 @@ func dialAgent(t *testing.T, addr string) (agentpb.AgentAPIClient, func()) {
 		t.Fatal(err)
 	}
 	return agentpb.NewAgentAPIClient(conn), func() { conn.Close() }
+}
+
+type fakeDashboardRoomService struct {
+	rooms []*messagepb.RoomInfo
+}
+
+func (f *fakeDashboardRoomService) CreateRoom(context.Context, string, string, []string) (*messagepb.RoomInfo, error) {
+	return nil, nil
+}
+func (f *fakeDashboardRoomService) JoinRoom(context.Context, string, string) (*messagepb.RoomInfo, error) {
+	return nil, nil
+}
+func (f *fakeDashboardRoomService) LeaveRoom(context.Context, string, string) (*messagepb.RoomInfo, error) {
+	return nil, nil
+}
+func (f *fakeDashboardRoomService) PostMessage(context.Context, string, string, []byte, string, string) (*messagepb.RoomEvent, error) {
+	return nil, nil
+}
+func (f *fakeDashboardRoomService) ListRooms(context.Context, string) ([]*messagepb.RoomInfo, error) {
+	return nil, nil
+}
+func (f *fakeDashboardRoomService) ListMembers(context.Context, string, string) ([]string, error) {
+	return nil, nil
+}
+func (f *fakeDashboardRoomService) Replay(context.Context, string, string, uint64) ([]*messagepb.RoomEvent, error) {
+	return nil, nil
+}
+func (f *fakeDashboardRoomService) CloseRoom(context.Context, string, string) (*messagepb.RoomInfo, error) {
+	return nil, nil
+}
+func (f *fakeDashboardRoomService) DashboardRooms(handles []string) ([]*messagepb.RoomInfo, error) {
+	_ = handles
+	return f.rooms, nil
 }
 
 func TestHandleBindingToConnection(t *testing.T) {
@@ -213,5 +247,40 @@ func TestMultipleConnectionsIndependent(t *testing.T) {
 			}
 			time.Sleep(50 * time.Millisecond)
 		}
+	}
+}
+
+func TestGetNodeStatusIncludesRooms(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
+	srv := NewAgentServer(session.NewStore(), nil, NewActivityBus(), logger)
+	srv.mu.Lock()
+	srv.handles["orchestrator"] = true
+	srv.subscribers["orchestrator"] = []chan *agentpb.IncomingMessage{make(chan *agentpb.IncomingMessage, 1)}
+	srv.hstats["orchestrator"] = &handleStats{}
+	srv.mu.Unlock()
+
+	srv.SetRoomManager(&fakeDashboardRoomService{
+		rooms: []*messagepb.RoomInfo{
+			{
+				RoomId:     "room-1",
+				Title:      "pair-solver",
+				CreatedBy:  "orchestrator",
+				HomeNodeId: "test-node",
+				Members:    []string{"orchestrator", "codex-solver"},
+				Status:     "open",
+				NextSeq:    4,
+			},
+		},
+	})
+
+	statusResp, err := srv.GetNodeStatus(context.Background(), &agentpb.GetNodeStatusRequest{})
+	if err != nil {
+		t.Fatalf("get node status: %v", err)
+	}
+	if len(statusResp.Rooms) != 1 {
+		t.Fatalf("rooms = %d, want 1", len(statusResp.Rooms))
+	}
+	if statusResp.Rooms[0].RoomId != "room-1" {
+		t.Fatalf("room id = %q, want room-1", statusResp.Rooms[0].RoomId)
 	}
 }

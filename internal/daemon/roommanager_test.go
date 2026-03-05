@@ -41,7 +41,7 @@ func TestRoomManagerCreatePostReplayAndClose(t *testing.T) {
 	})
 	tp := &fakeRoomTransport{}
 	deliverer := &fakeRoomDeliverer{}
-	rm := NewRoomManager("node-1", resolver, tp, deliverer, store, logger)
+	rm := NewRoomManager("node-1", resolver, tp, deliverer, store, NewActivityBus(), logger)
 
 	room, err := rm.CreateRoom(context.Background(), "alice", "design-review", []string{"bob"})
 	if err != nil {

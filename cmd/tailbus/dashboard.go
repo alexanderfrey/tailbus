@@ -57,6 +57,9 @@ var (
 	actRegStyle = lipgloss.NewStyle().
 			Foreground(lipgloss.Color("42"))
 
+	actRoomStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("213"))
+
 	// Topology styles
 	localNodeStyle = lipgloss.NewStyle().
 			Foreground(lipgloss.Color("42")).
@@ -258,6 +261,17 @@ func (m dashboardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				toHandle:   e.SessionOpened.ToHandle,
 				at:         now,
 			})
+		case *agentpb.ActivityEvent_RoomMessagePosted:
+			for _, member := range e.RoomMessagePosted.MemberHandles {
+				if member == "" || member == e.RoomMessagePosted.FromHandle {
+					continue
+				}
+				m.flashes = append(m.flashes, edgeFlash{
+					fromHandle: e.RoomMessagePosted.FromHandle,
+					toHandle:   member,
+					at:         now,
+				})
+			}
 		}
 		return m, m.watchNext
 
@@ -328,9 +342,56 @@ func formatActivity(event *agentpb.ActivityEvent) activityEntry {
 			label: fmt.Sprintf("REG %q", e.HandleRegistered.Handle),
 			style: actRegStyle,
 		}
+	case *agentpb.ActivityEvent_RoomCreated:
+		roomID := shortID(e.RoomCreated.RoomId)
+		return activityEntry{
+			time:  ts,
+			label: fmt.Sprintf("ROOM+ %s by %s [%d members]", roomID, e.RoomCreated.CreatedBy, len(e.RoomCreated.MemberHandles)),
+			style: actRoomStyle,
+		}
+	case *agentpb.ActivityEvent_RoomMessagePosted:
+		roomID := shortID(e.RoomMessagePosted.RoomId)
+		recipients := len(e.RoomMessagePosted.MemberHandles) - 1
+		if recipients < 0 {
+			recipients = 0
+		}
+		traceTag := ""
+		if e.RoomMessagePosted.TraceId != "" {
+			traceTag = fmt.Sprintf(" t:%s", shortID(e.RoomMessagePosted.TraceId))
+		}
+		return activityEntry{
+			time:  ts,
+			label: fmt.Sprintf("ROOM %s #%d %s -> %d peers%s", roomID, e.RoomMessagePosted.RoomSeq, e.RoomMessagePosted.FromHandle, recipients, traceTag),
+			style: actRoomStyle,
+		}
+	case *agentpb.ActivityEvent_RoomMemberJoined:
+		return activityEntry{
+			time:  ts,
+			label: fmt.Sprintf("JOIN %s -> room %s", e.RoomMemberJoined.Handle, shortID(e.RoomMemberJoined.RoomId)),
+			style: actRoomStyle,
+		}
+	case *agentpb.ActivityEvent_RoomMemberLeft:
+		return activityEntry{
+			time:  ts,
+			label: fmt.Sprintf("LEAVE %s <- room %s", e.RoomMemberLeft.Handle, shortID(e.RoomMemberLeft.RoomId)),
+			style: actRoomStyle,
+		}
+	case *agentpb.ActivityEvent_RoomClosed:
+		return activityEntry{
+			time:  ts,
+			label: fmt.Sprintf("ROOM- %s by %s", shortID(e.RoomClosed.RoomId), e.RoomClosed.ClosedBy),
+			style: actRoomStyle,
+		}
 	default:
 		return activityEntry{time: ts, label: "???", style: helpStyle}
 	}
+}
+
+func shortID(id string) string {
+	if len(id) > 8 {
+		return id[:8]
+	}
+	return id
 }
 
 // flashDirection represents the direction of message flow between two nodes.
@@ -1148,8 +1209,48 @@ func (m dashboardModel) renderHandlesSessions(width, maxLines int) string {
 		}
 	}
 
-	// Sessions
+	// Rooms
 	remaining := maxLines - lines
+	b.WriteString(headerStyle.Render("ROOMS") + "\n")
+	lines++
+	remaining--
+	if m.status == nil || len(m.status.Rooms) == 0 {
+		b.WriteString(helpStyle.Render("  (none)") + "\n")
+		lines++
+	} else {
+		shown := 0
+		roomLimit := remaining
+		if roomLimit > 6 {
+			roomLimit = 6
+		}
+		for _, room := range m.status.Rooms {
+			if shown >= roomLimit {
+				break
+			}
+			title := room.Title
+			if title == "" {
+				title = "(untitled)"
+			}
+			stateStr := openStyle.Render("[open]")
+			if room.Status != "open" {
+				stateStr = resolvedStyle.Render("[" + room.Status + "]")
+			}
+			seq := int64(room.NextSeq) - 1
+			if seq < 0 {
+				seq = 0
+			}
+			line := fmt.Sprintf("  %s %s m:%d seq:%d %s", shortID(room.RoomId), title, len(room.Members), seq, stateStr)
+			if lipgloss.Width(line) > width-2 {
+				line = line[:width-2]
+			}
+			b.WriteString(line + "\n")
+			lines++
+			shown++
+		}
+	}
+
+	// Sessions
+	remaining = maxLines - lines
 	b.WriteString(headerStyle.Render("SESSIONS") + "\n")
 	lines++
 	remaining--

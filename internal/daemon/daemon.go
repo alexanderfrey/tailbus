@@ -139,7 +139,7 @@ func New(cfg *config.DaemonConfig, logger *slog.Logger) (*Daemon, error) {
 	router := NewMessageRouter(resolver, tp, agentSrv, activity, logger)
 	router.SetTracing(traceStore, metrics, cfg.NodeID)
 	agentSrv.router = router
-	roomManager := NewRoomManager(cfg.NodeID, resolver, tp, agentSrv, msgStore, logger)
+	roomManager := NewRoomManager(cfg.NodeID, resolver, tp, agentSrv, msgStore, activity, logger)
 	agentSrv.SetRoomManager(roomManager)
 
 	// Create ACK tracker and wire into agent server + router

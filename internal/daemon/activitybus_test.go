@@ -105,6 +105,11 @@ func TestActivityBus_Counters(t *testing.T) {
 	bus.EmitMessageRouted("s1", "a", "b", false, "t1", "m1")
 	bus.EmitMessageRouted("s2", "c", "d", true, "t2", "m2")
 	bus.EmitMessageRouted("s2", "c", "d", true, "t2", "m3")
+	bus.EmitRoomCreated("room-1", "design-review", "a", []string{"a", "b"})
+	bus.EmitRoomMessagePosted("room-1", 1, "a", []string{"a", "b"}, "trace-room")
+	bus.EmitRoomMemberJoined("room-1", "c", []string{"a", "b", "c"})
+	bus.EmitRoomMemberLeft("room-1", "b", []string{"a", "c"})
+	bus.EmitRoomClosed("room-1", "a", []string{"a", "c"})
 	bus.MessagesReceivedRemote.Add(3)
 
 	c := bus.Counters()
@@ -126,6 +131,21 @@ func TestActivityBus_Counters(t *testing.T) {
 	}
 	if c.MessagesReceivedRemote != 3 {
 		t.Errorf("messages received remote = %d, want 3", c.MessagesReceivedRemote)
+	}
+	if c.RoomsCreated != 1 {
+		t.Errorf("rooms created = %d, want 1", c.RoomsCreated)
+	}
+	if c.RoomMessagesPosted != 1 {
+		t.Errorf("room messages posted = %d, want 1", c.RoomMessagesPosted)
+	}
+	if c.RoomMembersJoined != 1 {
+		t.Errorf("room members joined = %d, want 1", c.RoomMembersJoined)
+	}
+	if c.RoomMembersLeft != 1 {
+		t.Errorf("room members left = %d, want 1", c.RoomMembersLeft)
+	}
+	if c.RoomsClosed != 1 {
+		t.Errorf("rooms closed = %d, want 1", c.RoomsClosed)
 	}
 }
 
