@@ -174,7 +174,7 @@ func tickCmd() tea.Cmd {
 }
 
 func animTickCmd() tea.Cmd {
-	return tea.Tick(300*time.Millisecond, func(t time.Time) tea.Msg {
+	return tea.Tick(150*time.Millisecond, func(t time.Time) tea.Msg {
 		return animTickMsg(t)
 	})
 }
@@ -262,7 +262,7 @@ func (m dashboardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.watchNext
 
 	case animTickMsg:
-		m.animFrame = (m.animFrame + 1) % 4
+		m.animFrame = (m.animFrame + 1) % 120
 		// Expire old flashes
 		now := time.Now()
 		active := m.flashes[:0]
@@ -562,7 +562,7 @@ func (m dashboardModel) renderTopologyCompact(nodes []topoNode, width int) strin
 			icon = localNodeStyle.Render("\u25cf")
 			label = localNodeStyle.Render(n.id) + helpStyle.Render(" (this node)")
 			if len(n.handles) > 0 {
-				suffix = ": " + renderHandleList(n.handles, activeH)
+				suffix = ": " + renderHandleList(n.handles, activeH, m.animFrame)
 			}
 		} else {
 			switch n.connectivity {
@@ -580,7 +580,7 @@ func (m dashboardModel) renderTopologyCompact(nodes []topoNode, width int) strin
 				suffix = " " + helpStyle.Render("[offline]")
 			}
 			if len(n.handles) > 0 {
-				suffix += ": " + renderHandleList(n.handles, activeH)
+				suffix += ": " + renderHandleList(n.handles, activeH, m.animFrame)
 			}
 		}
 
@@ -626,7 +626,7 @@ func (m dashboardModel) renderTopologyGraph(nodes []topoNode, width, height int)
 	// Build local node box
 	localActive := m.isNodeActive(local)
 	localActiveHandles := m.activeHandlesFor(local)
-	localBox := renderNodeBox(local, true, localActive, localActiveHandles)
+	localBox := renderNodeBox(local, true, localActive, localActiveHandles, m.animFrame)
 
 	if len(remotes) == 0 {
 		b.WriteString(localBox)
@@ -655,7 +655,7 @@ func (m dashboardModel) renderTopologyGraph(nodes []topoNode, width, height int)
 	for i, remote := range remotes {
 		remoteActive := m.isNodeActive(remote)
 		remoteActiveHandles := m.activeHandlesFor(remote)
-		remoteBox := renderNodeBox(remote, false, remoteActive, remoteActiveHandles)
+		remoteBox := renderNodeBox(remote, false, remoteActive, remoteActiveHandles, m.animFrame)
 		flashDir := m.flashDirBetween(local, remote)
 		edge := renderEdge(remote, maxLocalW, flashDir, m.animFrame)
 
@@ -724,11 +724,11 @@ func (m dashboardModel) renderTopologyGraph(nodes []topoNode, width, height int)
 }
 
 // renderHandleList renders a comma-separated handle list, highlighting active ones.
-func renderHandleList(handles []string, active map[string]bool) string {
+func renderHandleList(handles []string, active map[string]bool, animFrame int) string {
 	parts := make([]string, len(handles))
 	for i, h := range handles {
 		if active[h] {
-			parts[i] = flashNodeStyle.Render(h)
+			parts[i] = shimmerText(h, animFrame, helpStyle, flashNodeStyle)
 		} else {
 			parts[i] = h
 		}
@@ -752,8 +752,30 @@ func (m dashboardModel) activeHandlesFor(n topoNode) map[string]bool {
 	return result
 }
 
+// shimmerText renders text with a bright highlight sweeping left-to-right.
+// Characters within a 3-rune window at the current position get highlightStyle,
+// others get baseStyle.
+func shimmerText(text string, frame int, baseStyle, highlightStyle lipgloss.Style) string {
+	runes := []rune(text)
+	runeCount := len(runes)
+	if runeCount == 0 {
+		return ""
+	}
+	const shimmerWidth = 3
+	pos := frame % (runeCount + shimmerWidth)
+	var b strings.Builder
+	for i, r := range runes {
+		if i >= pos-shimmerWidth && i < pos {
+			b.WriteString(highlightStyle.Render(string(r)))
+		} else {
+			b.WriteString(baseStyle.Render(string(r)))
+		}
+	}
+	return b.String()
+}
+
 // renderNodeBox renders an ASCII box for a topology node.
-func renderNodeBox(n topoNode, isLocal bool, active bool, activeHandles map[string]bool) string {
+func renderNodeBox(n topoNode, isLocal bool, active bool, activeHandles map[string]bool, animFrame int) string {
 	// Determine box width
 	nameLen := len(n.id)
 	maxContent := nameLen + 4 // icon + space + name + padding
@@ -806,7 +828,13 @@ func renderNodeBox(n topoNode, isLocal bool, active bool, activeHandles map[stri
 	if len(name) > innerW-2 {
 		name = name[:innerW-2]
 	}
-	nameLine := icon + " " + nameStyle.Render(name)
+	var renderedName string
+	if active {
+		renderedName = shimmerText(name, animFrame, nameStyle, flashNodeStyle)
+	} else {
+		renderedName = nameStyle.Render(name)
+	}
+	nameLine := icon + " " + renderedName
 	nameW := lipgloss.Width(icon+" ") + lipgloss.Width(nameStyle.Render(name))
 	padR := innerW - nameW + 2
 	if padR < 0 {
@@ -836,11 +864,13 @@ func renderNodeBox(n topoNode, isLocal bool, active bool, activeHandles map[stri
 		if padR < 0 {
 			padR = 0
 		}
-		hStyle := helpStyle
+		var renderedH string
 		if activeHandles[h] {
-			hStyle = flashNodeStyle
+			renderedH = shimmerText(hName, animFrame, helpStyle, flashNodeStyle)
+		} else {
+			renderedH = helpStyle.Render(hName)
 		}
-		b.WriteString("  " + borderStyle.Render("|") + " " + hStyle.Render(hName) + strings.Repeat(" ", padR) + borderStyle.Render("|") + "\n")
+		b.WriteString("  " + borderStyle.Render("|") + " " + renderedH + strings.Repeat(" ", padR) + borderStyle.Render("|") + "\n")
 	}
 
 	// Bottom border
@@ -1076,6 +1106,12 @@ func (m dashboardModel) renderHandlesSessions(width, maxLines int) string {
 	var b strings.Builder
 	lines := 0
 
+	// Build active handles set from flashes
+	activeHandles := make(map[string]bool)
+	for _, f := range m.flashes {
+		activeHandles[f.toHandle] = true
+	}
+
 	// Handles
 	b.WriteString(headerStyle.Render("HANDLES") + "\n")
 	lines++
@@ -1087,8 +1123,12 @@ func (m dashboardModel) renderHandlesSessions(width, maxLines int) string {
 			if lines >= maxLines-2 {
 				break
 			}
+			hName := h.Name
+			if activeHandles[hName] {
+				hName = shimmerText(hName, m.animFrame, helpStyle, flashNodeStyle)
+			}
 			line := fmt.Sprintf("  %s (%d subs) \u2193%d \u2191%d",
-				h.Name, h.SubscriberCount, h.MessagesIn, h.MessagesOut)
+				hName, h.SubscriberCount, h.MessagesIn, h.MessagesOut)
 			if h.QueueDepth > 0 {
 				qs := fmt.Sprintf(" q:%d", h.QueueDepth)
 				if h.QueueDepth > 32 {
