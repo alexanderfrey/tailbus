@@ -6,6 +6,11 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [v0.3.7] — 2026-03-05
+
+### Fixed
+- `tailbus team` commands failing with "error reading server preface: EOF" — CLI now uses TLS with an ephemeral client cert to connect to the coord server, matching the daemon's mTLS transport
+
 ## [v0.3.6] — 2026-03-04
 
 ### Added
@@ -65,7 +70,9 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 - Real-time TUI dashboard
 - Release pipeline and install script
 
-[Unreleased]: https://github.com/alexanderfrey/tailbus/compare/v0.3.5...HEAD
+[Unreleased]: https://github.com/alexanderfrey/tailbus/compare/v0.3.7...HEAD
+[v0.3.7]: https://github.com/alexanderfrey/tailbus/compare/v0.3.6...v0.3.7
+[v0.3.6]: https://github.com/alexanderfrey/tailbus/compare/v0.3.5...v0.3.6
 [v0.3.5]: https://github.com/alexanderfrey/tailbus/compare/v0.3.0...v0.3.5
 [v0.3.0]: https://github.com/alexanderfrey/tailbus/compare/v0.2.0...v0.3.0
 [v0.2.0]: https://github.com/alexanderfrey/tailbus/compare/v0.1.0...v0.2.0
