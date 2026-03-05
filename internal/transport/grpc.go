@@ -473,6 +473,21 @@ func (t *GRPCTransport) ConnectedRelayAddrs() []string {
 	return addrs
 }
 
+// DirectFailedAddrs returns peer addresses where direct connection has recently failed
+// (within the last 30s), meaning they may be reachable via relay.
+func (t *GRPCTransport) DirectFailedAddrs() []string {
+	t.relayMu.Lock()
+	defer t.relayMu.Unlock()
+	cutoff := time.Now().Add(-30 * time.Second)
+	var addrs []string
+	for addr, failTime := range t.directFails {
+		if failTime.After(cutoff) {
+			addrs = append(addrs, addr)
+		}
+	}
+	return addrs
+}
+
 // Close shuts down the transport.
 func (t *GRPCTransport) Close() error {
 	// Close peer connections first so streams end

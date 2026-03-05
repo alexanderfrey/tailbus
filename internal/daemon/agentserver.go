@@ -797,10 +797,12 @@ func (s *AgentServer) GetNodeStatus(_ context.Context, _ *agentpb.GetNodeStatusR
 			}
 		}
 
-		// Check if any relay is connected
-		anyRelayConnected := false
-		if s.dashTransport != nil {
-			anyRelayConnected = len(s.dashTransport.ConnectedRelayAddrs()) > 0
+		// Check which addrs have failed direct and may use relay
+		relayReachable := make(map[string]bool)
+		if s.dashTransport != nil && len(s.dashTransport.ConnectedRelayAddrs()) > 0 {
+			for _, addr := range s.dashTransport.DirectFailedAddrs() {
+				relayReachable[addr] = true
+			}
 		}
 
 		for nodeID, status := range nodeInfo {
@@ -808,7 +810,7 @@ func (s *AgentServer) GetNodeStatus(_ context.Context, _ *agentpb.GetNodeStatusR
 			if connectedAddrs[status.AdvertiseAddr] {
 				status.Connected = true
 				status.Connectivity = "direct"
-			} else if anyRelayConnected {
+			} else if relayReachable[status.AdvertiseAddr] {
 				status.Connected = true
 				status.Connectivity = "relay"
 			} else {
