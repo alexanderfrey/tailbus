@@ -13,6 +13,7 @@ import (
 	agentpb "github.com/alexanderfrey/tailbus/api/agentpb"
 	coordpb "github.com/alexanderfrey/tailbus/api/coordpb"
 	messagepb "github.com/alexanderfrey/tailbus/api/messagepb"
+	transportpb "github.com/alexanderfrey/tailbus/api/transportpb"
 	"github.com/alexanderfrey/tailbus/internal/coord"
 	"github.com/alexanderfrey/tailbus/internal/daemon"
 	"github.com/alexanderfrey/tailbus/internal/handle"
@@ -150,50 +151,58 @@ func TestRelayEndToEnd(t *testing.T) {
 	agentSrv2.SetRouter(router2)
 
 	// Wire transport callbacks
-	tp1.OnSend(func(env *messagepb.Envelope) {
-		if env.TraceId != "" {
-			traceStore1.RecordSpan(env.TraceId, env.MessageId, "node-1", agentpb.TraceAction_TRACE_ACTION_SENT_TO_TRANSPORT, nil)
-		}
+	tp1.OnSend(func(msg *transportpb.TransportMessage) {
+		withEnvelope(msg, func(env *messagepb.Envelope) {
+			if env.TraceId != "" {
+				traceStore1.RecordSpan(env.TraceId, env.MessageId, "node-1", agentpb.TraceAction_TRACE_ACTION_SENT_TO_TRANSPORT, nil)
+			}
+		})
 	})
-	tp2.OnSend(func(env *messagepb.Envelope) {
-		if env.TraceId != "" {
-			traceStore2.RecordSpan(env.TraceId, env.MessageId, "node-2", agentpb.TraceAction_TRACE_ACTION_SENT_TO_TRANSPORT, nil)
-		}
+	tp2.OnSend(func(msg *transportpb.TransportMessage) {
+		withEnvelope(msg, func(env *messagepb.Envelope) {
+			if env.TraceId != "" {
+				traceStore2.RecordSpan(env.TraceId, env.MessageId, "node-2", agentpb.TraceAction_TRACE_ACTION_SENT_TO_TRANSPORT, nil)
+			}
+		})
 	})
 
-	tp1.OnReceive(func(env *messagepb.Envelope) {
-		if env.TraceId != "" {
-			traceStore1.RecordSpan(env.TraceId, env.MessageId, "node-1", agentpb.TraceAction_TRACE_ACTION_RECEIVED_FROM_TRANSPORT, nil)
-		}
-		if _, ok := sessions1.Get(env.SessionId); !ok {
-			sess := &session.Session{
-				ID:         env.SessionId,
-				FromHandle: env.FromHandle,
-				ToHandle:   env.ToHandle,
-				State:      session.StateOpen,
-				CreatedAt:  time.Now(),
-				UpdatedAt:  time.Now(),
+	tp1.OnReceive(func(msg *transportpb.TransportMessage) {
+		withEnvelope(msg, func(env *messagepb.Envelope) {
+			if env.TraceId != "" {
+				traceStore1.RecordSpan(env.TraceId, env.MessageId, "node-1", agentpb.TraceAction_TRACE_ACTION_RECEIVED_FROM_TRANSPORT, nil)
 			}
-			sessions1.Put(sess)
-		}
-		agentSrv1.DeliverToLocal(env)
+			if _, ok := sessions1.Get(env.SessionId); !ok {
+				sess := &session.Session{
+					ID:         env.SessionId,
+					FromHandle: env.FromHandle,
+					ToHandle:   env.ToHandle,
+					State:      session.StateOpen,
+					CreatedAt:  time.Now(),
+					UpdatedAt:  time.Now(),
+				}
+				sessions1.Put(sess)
+			}
+			agentSrv1.DeliverToLocal(env)
+		})
 	})
-	tp2.OnReceive(func(env *messagepb.Envelope) {
-		if env.TraceId != "" {
-			traceStore2.RecordSpan(env.TraceId, env.MessageId, "node-2", agentpb.TraceAction_TRACE_ACTION_RECEIVED_FROM_TRANSPORT, nil)
-		}
-		if _, ok := sessions2.Get(env.SessionId); !ok {
-			sess := &session.Session{
-				ID:         env.SessionId,
-				FromHandle: env.FromHandle,
-				ToHandle:   env.ToHandle,
-				State:      session.StateOpen,
-				CreatedAt:  time.Now(),
-				UpdatedAt:  time.Now(),
+	tp2.OnReceive(func(msg *transportpb.TransportMessage) {
+		withEnvelope(msg, func(env *messagepb.Envelope) {
+			if env.TraceId != "" {
+				traceStore2.RecordSpan(env.TraceId, env.MessageId, "node-2", agentpb.TraceAction_TRACE_ACTION_RECEIVED_FROM_TRANSPORT, nil)
 			}
-			sessions2.Put(sess)
-		}
-		agentSrv2.DeliverToLocal(env)
+			if _, ok := sessions2.Get(env.SessionId); !ok {
+				sess := &session.Session{
+					ID:         env.SessionId,
+					FromHandle: env.FromHandle,
+					ToHandle:   env.ToHandle,
+					State:      session.StateOpen,
+					CreatedAt:  time.Now(),
+					UpdatedAt:  time.Now(),
+				}
+				sessions2.Put(sess)
+			}
+			agentSrv2.DeliverToLocal(env)
+		})
 	})
 
 	// Start agent servers on TCP

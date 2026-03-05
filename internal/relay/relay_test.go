@@ -19,6 +19,22 @@ import (
 	"google.golang.org/grpc/metadata"
 )
 
+func wrapEnvelope(env *messagepb.Envelope) *transportpb.TransportMessage {
+	return &transportpb.TransportMessage{
+		RelayTargetKey: env.RelayTargetKey,
+		Body:           &transportpb.TransportMessage_Envelope{Envelope: env},
+	}
+}
+
+func unwrapEnvelope(t *testing.T, msg *transportpb.TransportMessage) *messagepb.Envelope {
+	t.Helper()
+	env, ok := msg.Body.(*transportpb.TransportMessage_Envelope)
+	if !ok || env.Envelope == nil {
+		t.Fatalf("expected envelope transport message, got %T", msg.Body)
+	}
+	return env.Envelope
+}
+
 // noopVerifier allows all peers (for testing without full peer map).
 type noopVerifier struct{}
 
@@ -78,7 +94,7 @@ func TestRelayForwarding(t *testing.T) {
 		RelayTargetKey: kpB.Public,
 	}
 
-	if err := streamA.Send(env); err != nil {
+	if err := streamA.Send(wrapEnvelope(env)); err != nil {
 		t.Fatalf("A send: %v", err)
 	}
 
@@ -88,11 +104,13 @@ func TestRelayForwarding(t *testing.T) {
 		t.Fatalf("B recv: %v", err)
 	}
 
-	if received.MessageId != "msg-1" {
-		t.Errorf("message_id = %q, want msg-1", received.MessageId)
+	receivedEnv := unwrapEnvelope(t, received)
+
+	if receivedEnv.MessageId != "msg-1" {
+		t.Errorf("message_id = %q, want msg-1", receivedEnv.MessageId)
 	}
-	if string(received.Payload) != "hello via relay" {
-		t.Errorf("payload = %q", string(received.Payload))
+	if string(receivedEnv.Payload) != "hello via relay" {
+		t.Errorf("payload = %q", string(receivedEnv.Payload))
 	}
 	// The relay_target_key should still be present (relay doesn't strip it)
 	if hex.EncodeToString(received.RelayTargetKey) != hex.EncodeToString(kpB.Public) {
@@ -110,7 +128,7 @@ func TestRelayForwarding(t *testing.T) {
 		RelayTargetKey: kpA.Public,
 	}
 
-	if err := streamB.Send(reply); err != nil {
+	if err := streamB.Send(wrapEnvelope(reply)); err != nil {
 		t.Fatalf("B send: %v", err)
 	}
 
@@ -119,11 +137,13 @@ func TestRelayForwarding(t *testing.T) {
 		t.Fatalf("A recv: %v", err)
 	}
 
-	if receivedReply.MessageId != "msg-2" {
-		t.Errorf("reply message_id = %q, want msg-2", receivedReply.MessageId)
+	receivedReplyEnv := unwrapEnvelope(t, receivedReply)
+
+	if receivedReplyEnv.MessageId != "msg-2" {
+		t.Errorf("reply message_id = %q, want msg-2", receivedReplyEnv.MessageId)
 	}
-	if string(receivedReply.Payload) != "reply via relay" {
-		t.Errorf("reply payload = %q", string(receivedReply.Payload))
+	if string(receivedReplyEnv.Payload) != "reply via relay" {
+		t.Errorf("reply payload = %q", string(receivedReplyEnv.Payload))
 	}
 
 	t.Log("Relay forwarding test passed")
@@ -156,7 +176,7 @@ func TestRelayTargetNotConnected(t *testing.T) {
 		MessageId:      "msg-orphan",
 		RelayTargetKey: kpC.Public,
 	}
-	if err := streamA.Send(env); err != nil {
+	if err := streamA.Send(wrapEnvelope(env)); err != nil {
 		t.Fatalf("send: %v", err)
 	}
 
@@ -204,7 +224,7 @@ func TestRelayInsecureMetadata(t *testing.T) {
 		RelayTargetKey: kpB.Public,
 	}
 
-	if err := streamA.Send(env); err != nil {
+	if err := streamA.Send(wrapEnvelope(env)); err != nil {
 		t.Fatalf("A send: %v", err)
 	}
 
@@ -213,11 +233,12 @@ func TestRelayInsecureMetadata(t *testing.T) {
 		t.Fatalf("B recv: %v", err)
 	}
 
-	if received.MessageId != "insecure-msg-1" {
-		t.Errorf("message_id = %q, want insecure-msg-1", received.MessageId)
+	receivedEnv := unwrapEnvelope(t, received)
+	if receivedEnv.MessageId != "insecure-msg-1" {
+		t.Errorf("message_id = %q, want insecure-msg-1", receivedEnv.MessageId)
 	}
-	if string(received.Payload) != "hello insecure relay" {
-		t.Errorf("payload = %q", string(received.Payload))
+	if string(receivedEnv.Payload) != "hello insecure relay" {
+		t.Errorf("payload = %q", string(receivedEnv.Payload))
 	}
 
 	t.Log("Relay insecure metadata test passed")

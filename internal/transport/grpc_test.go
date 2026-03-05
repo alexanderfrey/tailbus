@@ -9,6 +9,7 @@ import (
 	"time"
 
 	messagepb "github.com/alexanderfrey/tailbus/api/messagepb"
+	transportpb "github.com/alexanderfrey/tailbus/api/transportpb"
 	"github.com/alexanderfrey/tailbus/internal/handle"
 	"github.com/alexanderfrey/tailbus/internal/identity"
 )
@@ -19,8 +20,10 @@ func TestRecvLoopCleansUpPeer(t *testing.T) {
 	// Create two transports: a server and a client
 	server := NewGRPCTransport(logger, nil, nil)
 	received := make(chan *messagepb.Envelope, 10)
-	server.OnReceive(func(env *messagepb.Envelope) {
-		received <- env
+	server.OnReceive(func(msg *transportpb.TransportMessage) {
+		if env, ok := msg.Body.(*transportpb.TransportMessage_Envelope); ok {
+			received <- env.Envelope
+		}
 	})
 
 	lis, err := net.Listen("tcp", "127.0.0.1:0")
@@ -39,7 +42,9 @@ func TestRecvLoopCleansUpPeer(t *testing.T) {
 		MessageId: "msg-1",
 		Payload:   []byte("hello"),
 	}
-	if err := client.Send(addr, env); err != nil {
+	if err := client.Send(addr, &transportpb.TransportMessage{
+		Body: &transportpb.TransportMessage_Envelope{Envelope: env},
+	}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -74,7 +79,7 @@ func TestContextCancellationClosesStreams(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
 
 	server := NewGRPCTransport(logger, nil, nil)
-	server.OnReceive(func(env *messagepb.Envelope) {})
+	server.OnReceive(func(_ *transportpb.TransportMessage) {})
 
 	lis, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -94,7 +99,9 @@ func TestContextCancellationClosesStreams(t *testing.T) {
 		MessageId: "msg-1",
 		Payload:   []byte("hello"),
 	}
-	if err := client.Send(addr, env); err != nil {
+	if err := client.Send(addr, &transportpb.TransportMessage{
+		Body: &transportpb.TransportMessage_Envelope{Envelope: env},
+	}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -144,7 +151,7 @@ func TestMTLSRejectsUnknownPeer(t *testing.T) {
 	// Server uses kp1's cert; verifier checks incoming certs
 	serverVerifier := NewResolverVerifier(resolver)
 	server := NewGRPCTransport(logger, &cert1, serverVerifier)
-	server.OnReceive(func(env *messagepb.Envelope) {})
+	server.OnReceive(func(_ *transportpb.TransportMessage) {})
 
 	lis, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -166,7 +173,11 @@ func TestMTLSRejectsUnknownPeer(t *testing.T) {
 	knownClient := NewGRPCTransport(logger, &cert2, knownVerifier)
 	knownClient.Start(context.Background())
 
-	err = knownClient.Send(addr, &messagepb.Envelope{MessageId: "msg-ok", Payload: []byte("hello")})
+	err = knownClient.Send(addr, &transportpb.TransportMessage{
+		Body: &transportpb.TransportMessage_Envelope{
+			Envelope: &messagepb.Envelope{MessageId: "msg-ok", Payload: []byte("hello")},
+		},
+	})
 	if err != nil {
 		t.Fatalf("known peer should connect: %v", err)
 	}
@@ -177,7 +188,11 @@ func TestMTLSRejectsUnknownPeer(t *testing.T) {
 	unknownClient := NewGRPCTransport(logger, &certUnknown, unknownVerifier)
 	unknownClient.Start(context.Background())
 
-	err = unknownClient.Send(addr, &messagepb.Envelope{MessageId: "msg-bad", Payload: []byte("hello")})
+	err = unknownClient.Send(addr, &transportpb.TransportMessage{
+		Body: &transportpb.TransportMessage_Envelope{
+			Envelope: &messagepb.Envelope{MessageId: "msg-bad", Payload: []byte("hello")},
+		},
+	})
 	if err == nil {
 		t.Fatal("unknown peer should be rejected")
 	}

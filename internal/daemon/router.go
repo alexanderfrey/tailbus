@@ -8,6 +8,7 @@ import (
 
 	agentpb "github.com/alexanderfrey/tailbus/api/agentpb"
 	messagepb "github.com/alexanderfrey/tailbus/api/messagepb"
+	transportpb "github.com/alexanderfrey/tailbus/api/transportpb"
 	"github.com/alexanderfrey/tailbus/internal/handle"
 	"github.com/alexanderfrey/tailbus/internal/transport"
 	"github.com/prometheus/client_golang/prometheus"
@@ -75,7 +76,10 @@ func (r *MessageRouter) Route(_ context.Context, env *messagepb.Envelope) error 
 	}
 
 	r.logger.Debug("routing to remote peer", "handle", env.ToHandle, "peer", peer.NodeID, "addr", peer.AdvertiseAddr)
-	if err := r.transport.Send(peer.AdvertiseAddr, env); err != nil {
+	msg := &transportpb.TransportMessage{
+		Body: &transportpb.TransportMessage_Envelope{Envelope: env},
+	}
+	if err := r.transport.Send(peer.AdvertiseAddr, msg); err != nil {
 		return err
 	}
 

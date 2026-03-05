@@ -14,6 +14,14 @@ __all__ = [
     "Sent",
     "Resolved",
     "Message",
+    "RoomEvent",
+    "RoomInfo",
+    "RoomCreated",
+    "RoomPosted",
+    "RoomReplay",
+    "RoomMembers",
+    "RoomList",
+    "RoomOpResult",
     "Introspected",
     "HandleEntry",
     "HandleList",
@@ -134,6 +142,69 @@ class Message:
 
 
 @dataclass(frozen=True, slots=True)
+class RoomEvent:
+    """An incoming room event."""
+
+    room_id: str
+    room_seq: int
+    sender_handle: str
+    subject_handle: str
+    payload: str
+    content_type: str
+    event_type: str
+    trace_id: str
+    event_id: str
+    sent_at: int
+    members: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class RoomInfo:
+    """Metadata for a shared room."""
+
+    room_id: str
+    title: str
+    created_by: str
+    home_node_id: str
+    members: tuple[str, ...]
+    status: str
+    next_seq: int
+    created_at: int
+    updated_at: int
+
+
+@dataclass(frozen=True, slots=True)
+class RoomCreated:
+    room_id: str
+
+
+@dataclass(frozen=True, slots=True)
+class RoomPosted:
+    event_id: str
+    room_seq: int
+
+
+@dataclass(frozen=True, slots=True)
+class RoomReplay:
+    events: tuple[RoomEvent, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class RoomMembers:
+    members: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class RoomList:
+    rooms: tuple[RoomInfo, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class RoomOpResult:
+    ok: bool
+
+
+@dataclass(frozen=True, slots=True)
 class Introspected:
     """Result of introspecting a handle."""
 
@@ -188,6 +259,14 @@ Response = Union[
     Sent,
     Resolved,
     Message,
+    RoomEvent,
+    RoomInfo,
+    RoomCreated,
+    RoomPosted,
+    RoomReplay,
+    RoomMembers,
+    RoomList,
+    RoomOpResult,
     Introspected,
     HandleList,
     SessionList,
@@ -211,6 +290,36 @@ def _register_parser(type_name: str):  # type: ignore[no-untyped-def]
         _PARSERS[type_name] = fn
         return fn
     return decorator
+
+
+def _room_info_from_dict(d: dict[str, Any]) -> RoomInfo:
+    return RoomInfo(
+        room_id=d["room_id"],
+        title=d.get("title", ""),
+        created_by=d.get("created_by", ""),
+        home_node_id=d.get("home_node_id", ""),
+        members=tuple(d.get("members", [])),
+        status=d.get("status", ""),
+        next_seq=d.get("next_seq", 0),
+        created_at=d.get("created_at", 0),
+        updated_at=d.get("updated_at", 0),
+    )
+
+
+def _room_event_from_dict(d: dict[str, Any]) -> RoomEvent:
+    return RoomEvent(
+        room_id=d["room_id"],
+        room_seq=d.get("room_seq", 0),
+        sender_handle=d.get("sender", ""),
+        subject_handle=d.get("subject", ""),
+        payload=d.get("payload", ""),
+        content_type=d.get("content_type", "text/plain"),
+        event_type=d.get("event_type", ""),
+        trace_id=d.get("trace_id", ""),
+        event_id=d.get("event_id", ""),
+        sent_at=d.get("sent_at", 0),
+        members=tuple(d.get("members", [])),
+    )
 
 
 @_register_parser("registered")
@@ -250,6 +359,43 @@ def _parse_message(d: dict[str, Any]) -> Message:
         message_id=d.get("message_id", ""),
         sent_at=d.get("sent_at", 0),
     )
+
+
+@_register_parser("room_event")
+def _parse_room_event(d: dict[str, Any]) -> RoomEvent:
+    return _room_event_from_dict(d)
+
+
+@_register_parser("room_created")
+def _parse_room_created(d: dict[str, Any]) -> RoomCreated:
+    return RoomCreated(room_id=d["room_id"])
+
+
+@_register_parser("room_posted")
+def _parse_room_posted(d: dict[str, Any]) -> RoomPosted:
+    return RoomPosted(event_id=d["event_id"], room_seq=d.get("room_seq", 0))
+
+
+@_register_parser("room_joined")
+@_register_parser("room_left")
+@_register_parser("room_closed")
+def _parse_room_op(d: dict[str, Any]) -> RoomOpResult:
+    return RoomOpResult(ok=d.get("ok", False))
+
+
+@_register_parser("rooms")
+def _parse_rooms(d: dict[str, Any]) -> RoomList:
+    return RoomList(rooms=tuple(_room_info_from_dict(room) for room in d.get("rooms", [])))
+
+
+@_register_parser("room_members")
+def _parse_room_members(d: dict[str, Any]) -> RoomMembers:
+    return RoomMembers(members=tuple(d.get("members", [])))
+
+
+@_register_parser("room_replay")
+def _parse_room_replay(d: dict[str, Any]) -> RoomReplay:
+    return RoomReplay(events=tuple(_room_event_from_dict(evt) for evt in d.get("events", [])))
 
 
 @_register_parser("introspected")

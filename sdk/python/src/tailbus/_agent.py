@@ -22,6 +22,14 @@ from ._protocol import (
     Manifest,
     Message,
     Opened,
+    RoomCreated,
+    RoomEvent,
+    RoomInfo,
+    RoomList,
+    RoomMembers,
+    RoomOpResult,
+    RoomPosted,
+    RoomReplay,
     Registered,
     Resolved,
     Response,
@@ -35,8 +43,8 @@ from ._protocol import (
 __all__ = ["AsyncAgent"]
 
 MessageHandler = Union[
-    Callable[[Message], Awaitable[None]],
-    Callable[[Message], None],
+    Callable[[Union[Message, RoomEvent]], Awaitable[None]],
+    Callable[[Union[Message, RoomEvent]], None],
 ]
 
 
@@ -237,6 +245,75 @@ class AsyncAgent:
         assert isinstance(resp, SessionList)
         return list(resp.sessions)
 
+    async def create_room(self, title: str, members: list[str] | None = None) -> str:
+        """Create a shared room owned by this daemon."""
+        self._require_registered()
+        cmd: dict[str, Any] = {"type": "create_room", "title": title, "members": members or []}
+        resp = await self._send_command(cmd)
+        assert isinstance(resp, RoomCreated)
+        return resp.room_id
+
+    async def join_room(self, room_id: str) -> bool:
+        """Join an existing room as this agent."""
+        self._require_registered()
+        resp = await self._send_command({"type": "join_room", "room_id": room_id})
+        assert isinstance(resp, RoomOpResult)
+        return resp.ok
+
+    async def leave_room(self, room_id: str) -> bool:
+        """Leave a shared room."""
+        self._require_registered()
+        resp = await self._send_command({"type": "leave_room", "room_id": room_id})
+        assert isinstance(resp, RoomOpResult)
+        return resp.ok
+
+    async def post_room_message(
+        self,
+        room_id: str,
+        payload: str,
+        *,
+        content_type: str = "text/plain",
+        trace_id: str = "",
+    ) -> RoomPosted:
+        """Post a message to a shared room."""
+        self._require_registered()
+        cmd: dict[str, Any] = {"type": "post_room", "room_id": room_id, "payload": payload}
+        if content_type != "text/plain":
+            cmd["content_type"] = content_type
+        if trace_id:
+            cmd["trace_id"] = trace_id
+        resp = await self._send_command(cmd)
+        assert isinstance(resp, RoomPosted)
+        return resp
+
+    async def list_rooms(self) -> list[RoomInfo]:
+        """List rooms this agent belongs to."""
+        self._require_registered()
+        resp = await self._send_command({"type": "list_rooms"})
+        assert isinstance(resp, RoomList)
+        return list(resp.rooms)
+
+    async def list_room_members(self, room_id: str) -> list[str]:
+        """List members of a room."""
+        self._require_registered()
+        resp = await self._send_command({"type": "room_members", "room_id": room_id})
+        assert isinstance(resp, RoomMembers)
+        return list(resp.members)
+
+    async def replay_room(self, room_id: str, *, since_seq: int = 0) -> list[RoomEvent]:
+        """Replay retained room events since the given room sequence."""
+        self._require_registered()
+        resp = await self._send_command({"type": "replay_room", "room_id": room_id, "since_seq": since_seq})
+        assert isinstance(resp, RoomReplay)
+        return list(resp.events)
+
+    async def close_room(self, room_id: str) -> bool:
+        """Close a room to new messages."""
+        self._require_registered()
+        resp = await self._send_command({"type": "close_room", "room_id": room_id})
+        assert isinstance(resp, RoomOpResult)
+        return resp.ok
+
     # ── Message handling ────────────────────────────────────────────
 
     def on_message(
@@ -305,7 +382,7 @@ class AsyncAgent:
                 except (ValueError, KeyError):
                     continue
 
-                if isinstance(resp, Message):
+                if isinstance(resp, (Message, RoomEvent)):
                     asyncio.create_task(self._dispatch_message(resp))
                 elif self._pending:
                     future = self._pending.popleft()
@@ -314,7 +391,7 @@ class AsyncAgent:
         except asyncio.CancelledError:
             return
 
-    async def _dispatch_message(self, msg: Message) -> None:
+    async def _dispatch_message(self, msg: Union[Message, RoomEvent]) -> None:
         """Dispatch an incoming message to the registered handler."""
         if self._handler is None:
             return

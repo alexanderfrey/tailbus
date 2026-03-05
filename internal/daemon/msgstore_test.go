@@ -182,3 +182,68 @@ func TestMessageStore_SurvivesReopen(t *testing.T) {
 		t.Fatalf("session not survived: %v", sessions)
 	}
 }
+
+func TestMessageStore_RoomRoundTrip(t *testing.T) {
+	ms := testStore(t)
+
+	room := &messagepb.RoomInfo{
+		RoomId:        "room-1",
+		Title:         "design-review",
+		CreatedBy:     "alice",
+		HomeNodeId:    "node-1",
+		Members:       []string{"alice", "bob"},
+		Status:        "open",
+		NextSeq:       2,
+		CreatedAtUnix: time.Now().Unix(),
+		UpdatedAtUnix: time.Now().Unix(),
+	}
+	if err := ms.StoreRoom(room); err != nil {
+		t.Fatalf("store room: %v", err)
+	}
+
+	loaded, err := ms.LoadRoom("room-1")
+	if err != nil {
+		t.Fatalf("load room: %v", err)
+	}
+	if loaded == nil {
+		t.Fatal("expected room to load")
+	}
+	if loaded.Title != "design-review" || loaded.HomeNodeId != "node-1" {
+		t.Fatalf("wrong room data: %+v", loaded)
+	}
+	if len(loaded.Members) != 2 {
+		t.Fatalf("members = %d, want 2", len(loaded.Members))
+	}
+}
+
+func TestMessageStore_RoomReplayRetention(t *testing.T) {
+	ms := testStore(t)
+
+	for seq := uint64(1); seq <= 3; seq++ {
+		event := &messagepb.RoomEvent{
+			EventId:      "event-" + string(rune('0'+seq)),
+			RoomId:       "room-1",
+			RoomSeq:      seq,
+			SenderHandle: "alice",
+			Type:         messagepb.RoomEventType_ROOM_EVENT_TYPE_MESSAGE_POSTED,
+			Payload:      []byte("hello"),
+			ContentType:  "text/plain",
+			SentAtUnix:   time.Now().Unix(),
+			Members:      []string{"alice", "bob"},
+		}
+		if err := ms.StoreRoomEvent(event, 2); err != nil {
+			t.Fatalf("store room event %d: %v", seq, err)
+		}
+	}
+
+	events, err := ms.ReplayRoomEvents("room-1", 0)
+	if err != nil {
+		t.Fatalf("replay room: %v", err)
+	}
+	if len(events) != 2 {
+		t.Fatalf("events = %d, want 2", len(events))
+	}
+	if events[0].RoomSeq != 2 || events[1].RoomSeq != 3 {
+		t.Fatalf("unexpected replay sequences: %d, %d", events[0].RoomSeq, events[1].RoomSeq)
+	}
+}

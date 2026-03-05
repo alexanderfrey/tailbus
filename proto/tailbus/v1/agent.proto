@@ -15,6 +15,14 @@ service AgentAPI {
   rpc SendMessage(SendMessageRequest) returns (SendMessageResponse);
   rpc Subscribe(SubscribeRequest) returns (stream IncomingMessage);
   rpc ResolveSession(ResolveSessionRequest) returns (ResolveSessionResponse);
+  rpc CreateRoom(CreateRoomRequest) returns (CreateRoomResponse);
+  rpc JoinRoom(JoinRoomRequest) returns (JoinRoomResponse);
+  rpc LeaveRoom(LeaveRoomRequest) returns (LeaveRoomResponse);
+  rpc PostRoomMessage(PostRoomMessageRequest) returns (PostRoomMessageResponse);
+  rpc ListRooms(ListRoomsRequest) returns (ListRoomsResponse);
+  rpc ListRoomMembers(ListRoomMembersRequest) returns (ListRoomMembersResponse);
+  rpc ReplayRoom(ReplayRoomRequest) returns (ReplayRoomResponse);
+  rpc CloseRoom(CloseRoomRequest) returns (CloseRoomResponse);
   rpc ListSessions(ListSessionsRequest) returns (ListSessionsResponse);
   rpc GetNodeStatus(GetNodeStatusRequest) returns (GetNodeStatusResponse);
   rpc WatchActivity(WatchActivityRequest) returns (stream ActivityEvent);
@@ -88,6 +96,7 @@ message SubscribeRequest {
 
 message IncomingMessage {
   Envelope envelope = 1;
+  RoomEvent room_event = 2;
 }
 
 message ResolveSessionRequest {
@@ -99,6 +108,83 @@ message ResolveSessionRequest {
 
 message ResolveSessionResponse {
   string message_id = 1;
+}
+
+message CreateRoomRequest {
+  string creator_handle = 1;
+  string title = 2;
+  repeated string initial_members = 3;
+}
+
+message CreateRoomResponse {
+  string room_id = 1;
+}
+
+message JoinRoomRequest {
+  string room_id = 1;
+  string handle = 2;
+}
+
+message JoinRoomResponse {
+  bool ok = 1;
+}
+
+message LeaveRoomRequest {
+  string room_id = 1;
+  string handle = 2;
+}
+
+message LeaveRoomResponse {
+  bool ok = 1;
+}
+
+message PostRoomMessageRequest {
+  string room_id = 1;
+  string from_handle = 2;
+  bytes payload = 3;
+  string content_type = 4;
+  string trace_id = 5;
+}
+
+message PostRoomMessageResponse {
+  string event_id = 1;
+  uint64 room_seq = 2;
+}
+
+message ListRoomsRequest {
+  string handle = 1;
+}
+
+message ListRoomsResponse {
+  repeated RoomInfo rooms = 1;
+}
+
+message ListRoomMembersRequest {
+  string room_id = 1;
+  string handle = 2;
+}
+
+message ListRoomMembersResponse {
+  repeated string members = 1;
+}
+
+message ReplayRoomRequest {
+  string room_id = 1;
+  string handle = 2;
+  uint64 since_seq = 3;
+}
+
+message ReplayRoomResponse {
+  repeated RoomEvent events = 1;
+}
+
+message CloseRoomRequest {
+  string room_id = 1;
+  string handle = 2;
+}
+
+message CloseRoomResponse {
+  bool ok = 1;
 }
 
 message ListSessionsRequest {

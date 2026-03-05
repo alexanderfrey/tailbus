@@ -10,6 +10,9 @@ service CoordinationAPI {
   rpc RegisterNode(RegisterNodeRequest) returns (RegisterNodeResponse);
   rpc WatchPeerMap(WatchPeerMapRequest) returns (stream PeerMapUpdate);
   rpc LookupHandle(LookupHandleRequest) returns (LookupHandleResponse);
+  rpc UpsertRoom(UpsertRoomRequest) returns (UpsertRoomResponse);
+  rpc LookupRoom(LookupRoomRequest) returns (LookupRoomResponse);
+  rpc ListRoomsForHandle(ListRoomsForHandleRequest) returns (ListRoomsForHandleResponse);
   rpc Heartbeat(HeartbeatRequest) returns (HeartbeatResponse);
   rpc CreateTeam(CreateTeamRequest) returns (CreateTeamResponse);
   rpc ListTeams(ListTeamsRequest) returns (ListTeamsResponse);
@@ -51,6 +54,7 @@ message PeerMapUpdate {
   repeated PeerInfo peers = 1;
   int64 version = 2;
   repeated RelayInfo relays = 3;
+  repeated RoomInfo rooms = 4;
 }
 
 message RelayInfo {
@@ -77,6 +81,35 @@ message LookupHandleRequest {
 message LookupHandleResponse {
   PeerInfo peer = 1;
   bool found = 2;
+}
+
+message UpsertRoomRequest {
+  RoomInfo room = 1;
+  string team_id = 2;
+}
+
+message UpsertRoomResponse {
+  bool ok = 1;
+  string error = 2;
+}
+
+message LookupRoomRequest {
+  string room_id = 1;
+  string team_id = 2;
+}
+
+message LookupRoomResponse {
+  RoomInfo room = 1;
+  bool found = 2;
+}
+
+message ListRoomsForHandleRequest {
+  string handle = 1;
+  string team_id = 2;
+}
+
+message ListRoomsForHandleResponse {
+  repeated RoomInfo rooms = 1;
 }
 
 message HeartbeatRequest {

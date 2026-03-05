@@ -127,6 +127,28 @@ func (s *Store) migrate() error {
 	}
 	s.db.Exec("ALTER TABLE nodes ADD COLUMN team_id TEXT NOT NULL DEFAULT ''")
 
+	_, err = s.db.Exec(`
+		CREATE TABLE IF NOT EXISTS rooms (
+			room_id TEXT PRIMARY KEY,
+			title TEXT NOT NULL,
+			created_by TEXT NOT NULL,
+			home_node_id TEXT NOT NULL,
+			status TEXT NOT NULL,
+			next_seq INTEGER NOT NULL DEFAULT 1,
+			created_at INTEGER NOT NULL,
+			updated_at INTEGER NOT NULL,
+			team_id TEXT NOT NULL DEFAULT ''
+		);
+		CREATE TABLE IF NOT EXISTS room_members (
+			room_id TEXT NOT NULL REFERENCES rooms(room_id) ON DELETE CASCADE,
+			handle TEXT NOT NULL,
+			PRIMARY KEY (room_id, handle)
+		);
+	`)
+	if err != nil {
+		return fmt.Errorf("create room tables: %w", err)
+	}
+
 	// Migrate handles table to support team-scoped handles (same handle name in
 	// different teams). Old schema: handle TEXT PRIMARY KEY (globally unique).
 	// New schema: PRIMARY KEY (handle, node_id) allows duplicate handle names
@@ -795,6 +817,127 @@ func (s *Store) GetNodesByTeam(teamID string) ([]*NodeRecord, error) {
 func (s *Store) SetNodeTeam(nodeID, teamID string) error {
 	_, err := s.db.Exec("UPDATE nodes SET team_id = ? WHERE node_id = ?", teamID, nodeID)
 	return err
+}
+
+// UpsertRoom inserts or updates room metadata and membership.
+func (s *Store) UpsertRoom(room *messagepb.RoomInfo, teamID string) error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	_, err = tx.Exec(`
+		INSERT INTO rooms (room_id, title, created_by, home_node_id, status, next_seq, created_at, updated_at, team_id)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT(room_id) DO UPDATE SET
+			title = excluded.title,
+			created_by = excluded.created_by,
+			home_node_id = excluded.home_node_id,
+			status = excluded.status,
+			next_seq = excluded.next_seq,
+			updated_at = excluded.updated_at,
+			team_id = excluded.team_id
+	`, room.RoomId, room.Title, room.CreatedBy, room.HomeNodeId, room.Status, room.NextSeq, room.CreatedAtUnix, room.UpdatedAtUnix, teamID)
+	if err != nil {
+		return err
+	}
+
+	if _, err := tx.Exec("DELETE FROM room_members WHERE room_id = ?", room.RoomId); err != nil {
+		return err
+	}
+	for _, member := range room.Members {
+		if _, err := tx.Exec("INSERT INTO room_members (room_id, handle) VALUES (?, ?)", room.RoomId, member); err != nil {
+			return err
+		}
+	}
+
+	return tx.Commit()
+}
+
+// LookupRoom finds a room by ID within a team scope.
+func (s *Store) LookupRoom(roomID, teamID string) (*messagepb.RoomInfo, error) {
+	query := `
+		SELECT room_id, title, created_by, home_node_id, status, next_seq, created_at, updated_at
+		FROM rooms
+		WHERE room_id = ?
+	`
+	args := []any{roomID}
+	if teamID != "" {
+		query += " AND team_id = ?"
+		args = append(args, teamID)
+	}
+
+	room := &messagepb.RoomInfo{}
+	err := s.db.QueryRow(query, args...).Scan(
+		&room.RoomId,
+		&room.Title,
+		&room.CreatedBy,
+		&room.HomeNodeId,
+		&room.Status,
+		&room.NextSeq,
+		&room.CreatedAtUnix,
+		&room.UpdatedAtUnix,
+	)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+
+	rows, err := s.db.Query("SELECT handle FROM room_members WHERE room_id = ? ORDER BY handle", roomID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var handle string
+		if err := rows.Scan(&handle); err != nil {
+			return nil, err
+		}
+		room.Members = append(room.Members, handle)
+	}
+	return room, nil
+}
+
+// ListRoomsForHandle returns all rooms a handle belongs to within the given team.
+func (s *Store) ListRoomsForHandle(handle, teamID string) ([]*messagepb.RoomInfo, error) {
+	query := "SELECT DISTINCT r.room_id FROM rooms r"
+	var args []any
+	if handle != "" {
+		query += " JOIN room_members rm ON r.room_id = rm.room_id WHERE rm.handle = ?"
+		args = append(args, handle)
+	} else {
+		query += " WHERE 1=1"
+	}
+	if teamID != "" {
+		query += " AND r.team_id = ?"
+		args = append(args, teamID)
+	}
+	query += " ORDER BY r.updated_at DESC"
+
+	rows, err := s.db.Query(query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var rooms []*messagepb.RoomInfo
+	for rows.Next() {
+		var roomID string
+		if err := rows.Scan(&roomID); err != nil {
+			return nil, err
+		}
+		room, err := s.LookupRoom(roomID, teamID)
+		if err != nil {
+			return nil, err
+		}
+		if room != nil {
+			rooms = append(rooms, room)
+		}
+	}
+	return rooms, nil
 }
 
 // LookupHandleInTeam finds which node serves a handle within a team scope.

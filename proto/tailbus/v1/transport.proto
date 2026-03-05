@@ -7,5 +7,16 @@ option go_package = "github.com/alexanderfrey/tailbus/api/transportpb";
 import "tailbus/v1/messages.proto";
 
 service NodeTransport {
-  rpc Exchange(stream Envelope) returns (stream Envelope);
+  rpc Exchange(stream TransportMessage) returns (stream TransportMessage);
+}
+
+message TransportMessage {
+  bytes relay_target_key = 1;
+
+  oneof body {
+    Envelope envelope = 2;
+    RoomEvent room_event = 3;
+    RoomCommand room_command = 4;
+    RoomCommandResult room_command_result = 5;
+  }
 }

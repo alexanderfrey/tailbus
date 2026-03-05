@@ -100,17 +100,17 @@ func (s *Server) Exchange(stream transportpb.NodeTransport_ExchangeServer) error
 		s.logger.Info("relay peer disconnected", "pubkey", keyHex[:16]+"...")
 	}()
 
-	// Recv loop: forward envelopes to target peers
+		// Recv loop: forward transport messages to target peers
 	for {
-		env, err := stream.Recv()
+		msg, err := stream.Recv()
 		if err != nil {
 			return err
 		}
 
-		targetKey := env.RelayTargetKey
+		targetKey := msg.RelayTargetKey
 		if len(targetKey) == 0 {
-			s.logger.Warn("relay received envelope without relay_target_key",
-				"from", keyHex[:16]+"...", "msg_id", env.MessageId)
+			s.logger.Warn("relay received message without relay_target_key",
+				"from", keyHex[:16]+"...")
 			continue
 		}
 
@@ -122,20 +122,20 @@ func (s *Server) Exchange(stream transportpb.NodeTransport_ExchangeServer) error
 
 		if !found {
 			s.logger.Warn("relay target not connected",
-				"target", targetHex[:16]+"...", "from", keyHex[:16]+"...", "msg_id", env.MessageId)
+				"target", targetHex[:16]+"...", "from", keyHex[:16]+"...")
 			continue
 		}
 
 		target.mu.Lock()
-		err = target.stream.Send(env)
+		err = target.stream.Send(msg)
 		target.mu.Unlock()
 
 		if err != nil {
 			s.logger.Warn("relay forward failed",
 				"target", targetHex[:16]+"...", "error", err)
 		} else {
-			s.logger.Debug("relay forwarded envelope",
-				"from", keyHex[:16]+"...", "target", targetHex[:16]+"...", "msg_id", env.MessageId)
+			s.logger.Debug("relay forwarded message",
+				"from", keyHex[:16]+"...", "target", targetHex[:16]+"...")
 		}
 	}
 }

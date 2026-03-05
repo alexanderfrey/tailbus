@@ -1,16 +1,16 @@
 package transport
 
 import (
-	messagepb "github.com/alexanderfrey/tailbus/api/messagepb"
+	transportpb "github.com/alexanderfrey/tailbus/api/transportpb"
 )
 
 // Transport defines the interface for P2P communication between daemons.
 type Transport interface {
-	// Send sends an envelope to a peer at the given address.
-	Send(addr string, env *messagepb.Envelope) error
+	// Send sends a transport message to a peer at the given address.
+	Send(addr string, msg *transportpb.TransportMessage) error
 
-	// OnReceive registers a callback for incoming envelopes.
-	OnReceive(fn func(*messagepb.Envelope))
+	// OnReceive registers a callback for incoming transport messages.
+	OnReceive(fn func(*transportpb.TransportMessage))
 
 	// Close shuts down the transport.
 	Close() error

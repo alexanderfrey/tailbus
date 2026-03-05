@@ -1,0 +1,540 @@
+package daemon
+
+import (
+	"context"
+	"fmt"
+	"log/slog"
+	"slices"
+	"sync"
+	"time"
+
+	messagepb "github.com/alexanderfrey/tailbus/api/messagepb"
+	transportpb "github.com/alexanderfrey/tailbus/api/transportpb"
+	"github.com/alexanderfrey/tailbus/internal/handle"
+	"github.com/alexanderfrey/tailbus/internal/transport"
+	"github.com/google/uuid"
+)
+
+const defaultRoomEventRetention = 10000
+
+// RoomDeliverer delivers room events to local agent subscribers.
+type RoomDeliverer interface {
+	DeliverRoomEventLocal(event *messagepb.RoomEvent) bool
+}
+
+type RoomManager struct {
+	nodeID      string
+	resolver    *handle.Resolver
+	transport   transport.Transport
+	deliverer   RoomDeliverer
+	store       *MessageStore
+	logger      *slog.Logger
+	retention   int
+
+	mu          sync.Mutex
+	pendingResp map[string]chan *messagepb.RoomCommandResult
+	coord       *CoordClient
+}
+
+func NewRoomManager(nodeID string, resolver *handle.Resolver, tp transport.Transport, deliverer RoomDeliverer, store *MessageStore, logger *slog.Logger) *RoomManager {
+	return &RoomManager{
+		nodeID:      nodeID,
+		resolver:    resolver,
+		transport:   tp,
+		deliverer:   deliverer,
+		store:       store,
+		logger:      logger,
+		retention:   defaultRoomEventRetention,
+		pendingResp: make(map[string]chan *messagepb.RoomCommandResult),
+	}
+}
+
+func (rm *RoomManager) SetCoordClient(cc *CoordClient) {
+	rm.coord = cc
+}
+
+func (rm *RoomManager) CreateRoom(ctx context.Context, creator, title string, initialMembers []string) (*messagepb.RoomInfo, error) {
+	members := uniqueHandles(append([]string{creator}, initialMembers...))
+	now := time.Now().Unix()
+	room := &messagepb.RoomInfo{
+		RoomId:        uuid.New().String(),
+		Title:         title,
+		CreatedBy:     creator,
+		HomeNodeId:    rm.nodeID,
+		Members:       members,
+		Status:        "open",
+		NextSeq:       1,
+		CreatedAtUnix: now,
+		UpdatedAtUnix: now,
+	}
+	if err := rm.store.StoreRoom(room); err != nil {
+		return nil, err
+	}
+	if rm.coord != nil {
+		if err := rm.coord.UpsertRoom(ctx, room); err != nil {
+			return nil, err
+		}
+	}
+	return room, nil
+}
+
+func (rm *RoomManager) JoinRoom(ctx context.Context, roomID, handle string) (*messagepb.RoomInfo, error) {
+	result, err := rm.withRoomControl(ctx, roomID, &messagepb.RoomCommand{
+		RequestId:       uuid.New().String(),
+		Type:            messagepb.RoomCommandType_ROOM_COMMAND_TYPE_JOIN,
+		RoomId:          roomID,
+		RequesterHandle: handle,
+		SubjectHandle:   handle,
+		RequesterNodeId: rm.nodeID,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return result.Room, nil
+}
+
+func (rm *RoomManager) LeaveRoom(ctx context.Context, roomID, handle string) (*messagepb.RoomInfo, error) {
+	result, err := rm.withRoomControl(ctx, roomID, &messagepb.RoomCommand{
+		RequestId:       uuid.New().String(),
+		Type:            messagepb.RoomCommandType_ROOM_COMMAND_TYPE_LEAVE,
+		RoomId:          roomID,
+		RequesterHandle: handle,
+		SubjectHandle:   handle,
+		RequesterNodeId: rm.nodeID,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return result.Room, nil
+}
+
+func (rm *RoomManager) PostMessage(ctx context.Context, roomID, from string, payload []byte, contentType, traceID string) (*messagepb.RoomEvent, error) {
+	result, err := rm.withRoomControl(ctx, roomID, &messagepb.RoomCommand{
+		RequestId:       uuid.New().String(),
+		Type:            messagepb.RoomCommandType_ROOM_COMMAND_TYPE_POST,
+		RoomId:          roomID,
+		RequesterHandle: from,
+		Payload:         payload,
+		ContentType:     contentType,
+		TraceId:         traceID,
+		RequesterNodeId: rm.nodeID,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return result.Event, nil
+}
+
+func (rm *RoomManager) ListRooms(ctx context.Context, handle string) ([]*messagepb.RoomInfo, error) {
+	if rm.coord != nil {
+		return rm.coord.ListRoomsForHandle(ctx, handle)
+	}
+	return nil, nil
+}
+
+func (rm *RoomManager) ListMembers(ctx context.Context, roomID, handle string) ([]string, error) {
+	result, err := rm.withRoomControl(ctx, roomID, &messagepb.RoomCommand{
+		RequestId:       uuid.New().String(),
+		Type:            messagepb.RoomCommandType_ROOM_COMMAND_TYPE_LIST_MEMBERS,
+		RoomId:          roomID,
+		RequesterHandle: handle,
+		RequesterNodeId: rm.nodeID,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return result.Members, nil
+}
+
+func (rm *RoomManager) Replay(ctx context.Context, roomID, handle string, sinceSeq uint64) ([]*messagepb.RoomEvent, error) {
+	result, err := rm.withRoomControl(ctx, roomID, &messagepb.RoomCommand{
+		RequestId:       uuid.New().String(),
+		Type:            messagepb.RoomCommandType_ROOM_COMMAND_TYPE_REPLAY,
+		RoomId:          roomID,
+		RequesterHandle: handle,
+		SinceSeq:        sinceSeq,
+		RequesterNodeId: rm.nodeID,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return result.Events, nil
+}
+
+func (rm *RoomManager) CloseRoom(ctx context.Context, roomID, handle string) (*messagepb.RoomInfo, error) {
+	result, err := rm.withRoomControl(ctx, roomID, &messagepb.RoomCommand{
+		RequestId:       uuid.New().String(),
+		Type:            messagepb.RoomCommandType_ROOM_COMMAND_TYPE_CLOSE,
+		RoomId:          roomID,
+		RequesterHandle: handle,
+		RequesterNodeId: rm.nodeID,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return result.Room, nil
+}
+
+func (rm *RoomManager) HandleTransportMessage(ctx context.Context, msg *transportpb.TransportMessage) {
+	switch body := msg.Body.(type) {
+	case *transportpb.TransportMessage_RoomEvent:
+		if body.RoomEvent != nil {
+			rm.deliverer.DeliverRoomEventLocal(body.RoomEvent)
+		}
+	case *transportpb.TransportMessage_RoomCommand:
+		if body.RoomCommand != nil {
+			rm.handleRemoteCommand(ctx, body.RoomCommand)
+		}
+	case *transportpb.TransportMessage_RoomCommandResult:
+		if body.RoomCommandResult != nil {
+			rm.handleRemoteCommandResult(body.RoomCommandResult)
+		}
+	}
+}
+
+func (rm *RoomManager) withRoomControl(ctx context.Context, roomID string, cmd *messagepb.RoomCommand) (*messagepb.RoomCommandResult, error) {
+	room, err := rm.resolveRoomInfo(roomID)
+	if err != nil {
+		return nil, err
+	}
+	if room.HomeNodeId == rm.nodeID {
+		result, err := rm.executeCommand(ctx, room, cmd)
+		if err != nil {
+			return nil, err
+		}
+		result.RequestId = cmd.RequestId
+		return result, nil
+	}
+
+	addr, err := rm.nodeAddr(room.HomeNodeId)
+	if err != nil {
+		return nil, err
+	}
+	respCh := make(chan *messagepb.RoomCommandResult, 1)
+	rm.mu.Lock()
+	rm.pendingResp[cmd.RequestId] = respCh
+	rm.mu.Unlock()
+
+	defer func() {
+		rm.mu.Lock()
+		delete(rm.pendingResp, cmd.RequestId)
+		rm.mu.Unlock()
+	}()
+
+	if err := rm.transport.Send(addr, &transportpb.TransportMessage{
+		Body: &transportpb.TransportMessage_RoomCommand{RoomCommand: cmd},
+	}); err != nil {
+		return nil, err
+	}
+
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case result := <-respCh:
+		if result == nil {
+			return nil, fmt.Errorf("room command %s returned no result", cmd.Type)
+		}
+		if !result.Ok {
+			return nil, fmt.Errorf("%s", result.Error)
+		}
+		return result, nil
+	case <-time.After(10 * time.Second):
+		return nil, fmt.Errorf("timed out waiting for room command result")
+	}
+}
+
+func (rm *RoomManager) handleRemoteCommand(ctx context.Context, cmd *messagepb.RoomCommand) {
+	room, err := rm.resolveRoomInfo(cmd.RoomId)
+	if err != nil {
+		rm.replyWithError(cmd, err)
+		return
+	}
+	result, err := rm.executeCommand(ctx, room, cmd)
+	if err != nil {
+		rm.replyWithError(cmd, err)
+		return
+	}
+	result.RequestId = cmd.RequestId
+	if cmd.RequesterNodeId == "" || cmd.RequesterNodeId == rm.nodeID {
+		rm.handleRemoteCommandResult(result)
+		return
+	}
+	addr, err := rm.nodeAddr(cmd.RequesterNodeId)
+	if err != nil {
+		rm.logger.Warn("failed to find requester node for room command result", "node_id", cmd.RequesterNodeId, "error", err)
+		return
+	}
+	if err := rm.transport.Send(addr, &transportpb.TransportMessage{
+		Body: &transportpb.TransportMessage_RoomCommandResult{RoomCommandResult: result},
+	}); err != nil {
+		rm.logger.Warn("failed to send room command result", "request_id", cmd.RequestId, "error", err)
+	}
+}
+
+func (rm *RoomManager) handleRemoteCommandResult(result *messagepb.RoomCommandResult) {
+	rm.mu.Lock()
+	ch := rm.pendingResp[result.RequestId]
+	rm.mu.Unlock()
+	if ch == nil {
+		return
+	}
+	select {
+	case ch <- result:
+	default:
+	}
+}
+
+func (rm *RoomManager) executeCommand(ctx context.Context, room *messagepb.RoomInfo, cmd *messagepb.RoomCommand) (*messagepb.RoomCommandResult, error) {
+	switch cmd.Type {
+	case messagepb.RoomCommandType_ROOM_COMMAND_TYPE_JOIN:
+		return rm.joinLocal(ctx, room, cmd.SubjectHandle)
+	case messagepb.RoomCommandType_ROOM_COMMAND_TYPE_LEAVE:
+		return rm.leaveLocal(ctx, room, cmd.SubjectHandle)
+	case messagepb.RoomCommandType_ROOM_COMMAND_TYPE_POST:
+		return rm.postLocal(ctx, room, cmd.RequesterHandle, cmd.Payload, cmd.ContentType, cmd.TraceId)
+	case messagepb.RoomCommandType_ROOM_COMMAND_TYPE_REPLAY:
+		return rm.replayLocal(room, cmd.RequesterHandle, cmd.SinceSeq)
+	case messagepb.RoomCommandType_ROOM_COMMAND_TYPE_LIST_MEMBERS:
+		if !isRoomMember(room, cmd.RequesterHandle) {
+			return nil, fmt.Errorf("handle %q is not a member of room %q", cmd.RequesterHandle, room.RoomId)
+		}
+		return &messagepb.RoomCommandResult{
+			RequestId: cmd.RequestId,
+			Ok:        true,
+			Members:   append([]string(nil), room.Members...),
+			Room:      room,
+		}, nil
+	case messagepb.RoomCommandType_ROOM_COMMAND_TYPE_CLOSE:
+		return rm.closeLocal(ctx, room, cmd.RequesterHandle)
+	default:
+		return nil, fmt.Errorf("unsupported room command %s", cmd.Type)
+	}
+}
+
+func (rm *RoomManager) joinLocal(ctx context.Context, room *messagepb.RoomInfo, handle string) (*messagepb.RoomCommandResult, error) {
+	if room.Status != "open" {
+		return nil, fmt.Errorf("room %q is %s", room.RoomId, room.Status)
+	}
+	if slices.Contains(room.Members, handle) {
+		return &messagepb.RoomCommandResult{Ok: true, Room: room, Members: room.Members}, nil
+	}
+	room.Members = append(room.Members, handle)
+	return rm.recordMembershipEvent(ctx, room, messagepb.RoomEventType_ROOM_EVENT_TYPE_MEMBER_JOINED, handle)
+}
+
+func (rm *RoomManager) leaveLocal(ctx context.Context, room *messagepb.RoomInfo, handle string) (*messagepb.RoomCommandResult, error) {
+	if !slices.Contains(room.Members, handle) {
+		return nil, fmt.Errorf("handle %q is not a member of room %q", handle, room.RoomId)
+	}
+	room.Members = removeHandle(room.Members, handle)
+	return rm.recordMembershipEvent(ctx, room, messagepb.RoomEventType_ROOM_EVENT_TYPE_MEMBER_LEFT, handle)
+}
+
+func (rm *RoomManager) postLocal(ctx context.Context, room *messagepb.RoomInfo, from string, payload []byte, contentType, traceID string) (*messagepb.RoomCommandResult, error) {
+	if room.Status != "open" {
+		return nil, fmt.Errorf("room %q is %s", room.RoomId, room.Status)
+	}
+	if !isRoomMember(room, from) {
+		return nil, fmt.Errorf("handle %q is not a member of room %q", from, room.RoomId)
+	}
+	event := rm.nextEvent(room, messagepb.RoomEventType_ROOM_EVENT_TYPE_MESSAGE_POSTED, from, "", payload, contentType, traceID)
+	if err := rm.persistAndPublish(ctx, room, event); err != nil {
+		return nil, err
+	}
+	return &messagepb.RoomCommandResult{
+		Ok:        true,
+		Room:      room,
+		Event:     event,
+	}, nil
+}
+
+func (rm *RoomManager) replayLocal(room *messagepb.RoomInfo, handle string, sinceSeq uint64) (*messagepb.RoomCommandResult, error) {
+	if !isRoomMember(room, handle) {
+		return nil, fmt.Errorf("handle %q is not a member of room %q", handle, room.RoomId)
+	}
+	events, err := rm.store.ReplayRoomEvents(room.RoomId, sinceSeq)
+	if err != nil {
+		return nil, err
+	}
+	return &messagepb.RoomCommandResult{
+		Ok:        true,
+		Room:      room,
+		Events:    events,
+	}, nil
+}
+
+func (rm *RoomManager) closeLocal(ctx context.Context, room *messagepb.RoomInfo, handle string) (*messagepb.RoomCommandResult, error) {
+	if !isRoomMember(room, handle) {
+		return nil, fmt.Errorf("handle %q is not a member of room %q", handle, room.RoomId)
+	}
+	room.Status = "closed"
+	event := rm.nextEvent(room, messagepb.RoomEventType_ROOM_EVENT_TYPE_ROOM_CLOSED, handle, "", nil, "text/plain", "")
+	if err := rm.persistAndPublish(ctx, room, event); err != nil {
+		return nil, err
+	}
+	return &messagepb.RoomCommandResult{
+		Ok:        true,
+		Room:      room,
+		Event:     event,
+	}, nil
+}
+
+func (rm *RoomManager) recordMembershipEvent(ctx context.Context, room *messagepb.RoomInfo, typ messagepb.RoomEventType, subject string) (*messagepb.RoomCommandResult, error) {
+	event := rm.nextEvent(room, typ, subject, subject, nil, "text/plain", "")
+	if err := rm.persistAndPublish(ctx, room, event); err != nil {
+		return nil, err
+	}
+	return &messagepb.RoomCommandResult{
+		Ok:        true,
+		Room:      room,
+		Event:     event,
+		Members:   append([]string(nil), room.Members...),
+	}, nil
+}
+
+func (rm *RoomManager) nextEvent(room *messagepb.RoomInfo, typ messagepb.RoomEventType, sender, subject string, payload []byte, contentType, traceID string) *messagepb.RoomEvent {
+	event := &messagepb.RoomEvent{
+		EventId:      uuid.New().String(),
+		RoomId:       room.RoomId,
+		RoomSeq:      room.NextSeq,
+		SenderHandle: sender,
+		SubjectHandle: subject,
+		Payload:      payload,
+		ContentType:  contentType,
+		SentAtUnix:   time.Now().Unix(),
+		Type:         typ,
+		TraceId:      traceID,
+		Members:      append([]string(nil), room.Members...),
+	}
+	room.NextSeq++
+	room.UpdatedAtUnix = event.SentAtUnix
+	return event
+}
+
+func (rm *RoomManager) persistAndPublish(ctx context.Context, room *messagepb.RoomInfo, event *messagepb.RoomEvent) error {
+	if err := rm.store.StoreRoom(room); err != nil {
+		return err
+	}
+	if err := rm.store.StoreRoomEvent(event, rm.retention); err != nil {
+		return err
+	}
+	if rm.coord != nil {
+		if err := rm.coord.UpsertRoom(ctx, room); err != nil {
+			return err
+		}
+	}
+	rm.publishEvent(event)
+	return nil
+}
+
+func (rm *RoomManager) publishEvent(event *messagepb.RoomEvent) {
+	localDelivered := false
+	sent := make(map[string]bool)
+	for _, member := range event.Members {
+		if member == event.SenderHandle {
+			continue
+		}
+		peer, err := rm.resolver.Resolve(member)
+		if err != nil {
+			rm.logger.Warn("failed to resolve room member", "room_id", event.RoomId, "member", member, "error", err)
+			continue
+		}
+		if peer.NodeID == rm.nodeID {
+			localDelivered = rm.deliverer.DeliverRoomEventLocal(event) || localDelivered
+			continue
+		}
+		if sent[peer.AdvertiseAddr] {
+			continue
+		}
+		sent[peer.AdvertiseAddr] = true
+		if err := rm.transport.Send(peer.AdvertiseAddr, &transportpb.TransportMessage{
+			Body: &transportpb.TransportMessage_RoomEvent{RoomEvent: event},
+		}); err != nil {
+			rm.logger.Warn("failed to send room event", "room_id", event.RoomId, "peer", peer.NodeID, "error", err)
+		}
+	}
+	if !localDelivered {
+		rm.deliverer.DeliverRoomEventLocal(event)
+	}
+}
+
+func (rm *RoomManager) replyWithError(cmd *messagepb.RoomCommand, err error) {
+	result := &messagepb.RoomCommandResult{
+		RequestId: cmd.RequestId,
+		Ok:        false,
+		Error:     err.Error(),
+	}
+	if cmd.RequesterNodeId == "" || cmd.RequesterNodeId == rm.nodeID {
+		rm.handleRemoteCommandResult(result)
+		return
+	}
+	addr, lookupErr := rm.nodeAddr(cmd.RequesterNodeId)
+	if lookupErr != nil {
+		rm.logger.Warn("failed to resolve requester node for error reply", "node_id", cmd.RequesterNodeId, "error", lookupErr)
+		return
+	}
+	if sendErr := rm.transport.Send(addr, &transportpb.TransportMessage{
+		Body: &transportpb.TransportMessage_RoomCommandResult{RoomCommandResult: result},
+	}); sendErr != nil {
+		rm.logger.Warn("failed to send room error result", "request_id", cmd.RequestId, "error", sendErr)
+	}
+}
+
+func (rm *RoomManager) resolveRoomInfo(roomID string) (*messagepb.RoomInfo, error) {
+	if room, err := rm.store.LoadRoom(roomID); err != nil {
+		return nil, err
+	} else if room != nil {
+		return room, nil
+	}
+	info, err := rm.resolver.ResolveRoom(roomID)
+	if err != nil {
+		return nil, err
+	}
+	return &messagepb.RoomInfo{
+		RoomId:        info.RoomID,
+		Title:         info.Title,
+		CreatedBy:     info.CreatedBy,
+		HomeNodeId:    info.HomeNodeID,
+		Members:       append([]string(nil), info.Members...),
+		Status:        info.Status,
+		NextSeq:       info.NextSeq,
+		CreatedAtUnix: info.CreatedAt,
+		UpdatedAtUnix: info.UpdatedAt,
+	}, nil
+}
+
+func (rm *RoomManager) nodeAddr(nodeID string) (string, error) {
+	for _, node := range rm.resolver.GetNodes() {
+		if node.NodeID == nodeID {
+			return node.AdvertiseAddr, nil
+		}
+	}
+	return "", fmt.Errorf("node %q not found", nodeID)
+}
+
+func isRoomMember(room *messagepb.RoomInfo, handle string) bool {
+	return slices.Contains(room.Members, handle)
+}
+
+func uniqueHandles(handles []string) []string {
+	var result []string
+	seen := make(map[string]bool, len(handles))
+	for _, handle := range handles {
+		if handle == "" || seen[handle] {
+			continue
+		}
+		seen[handle] = true
+		result = append(result, handle)
+	}
+	return result
+}
+
+func removeHandle(handles []string, target string) []string {
+	result := make([]string, 0, len(handles))
+	for _, handle := range handles {
+		if handle != target {
+			result = append(result, handle)
+		}
+	}
+	return result
+}

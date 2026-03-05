@@ -16,6 +16,8 @@ import (
 var (
 	bucketPending  = []byte("pending_messages")
 	bucketSessions = []byte("sessions")
+	bucketRooms    = []byte("rooms")
+	bucketRoomLogs = []byte("room_events")
 )
 
 // MessageStore provides durable storage for pending messages and sessions
@@ -59,6 +61,12 @@ func NewMessageStore(path string, logger *slog.Logger) (*MessageStore, error) {
 			return err
 		}
 		if _, err := tx.CreateBucketIfNotExists(bucketSessions); err != nil {
+			return err
+		}
+		if _, err := tx.CreateBucketIfNotExists(bucketRooms); err != nil {
+			return err
+		}
+		if _, err := tx.CreateBucketIfNotExists(bucketRoomLogs); err != nil {
 			return err
 		}
 		return nil
@@ -238,4 +246,114 @@ func (ms *MessageStore) PendingCount() int {
 		return nil
 	})
 	return count
+}
+
+// --- Rooms ---
+
+func roomSeqKey(seq uint64) []byte {
+	return []byte(fmt.Sprintf("%020d", seq))
+}
+
+// StoreRoom persists room metadata.
+func (ms *MessageStore) StoreRoom(room *messagepb.RoomInfo) error {
+	raw, err := proto.Marshal(room)
+	if err != nil {
+		return fmt.Errorf("marshal room: %w", err)
+	}
+	return ms.db.Update(func(tx *bolt.Tx) error {
+		return tx.Bucket(bucketRooms).Put([]byte(room.RoomId), raw)
+	})
+}
+
+// LoadRoom returns a persisted room, if any.
+func (ms *MessageStore) LoadRoom(roomID string) (*messagepb.RoomInfo, error) {
+	var room *messagepb.RoomInfo
+	err := ms.db.View(func(tx *bolt.Tx) error {
+		raw := tx.Bucket(bucketRooms).Get([]byte(roomID))
+		if raw == nil {
+			return nil
+		}
+		room = &messagepb.RoomInfo{}
+		return proto.Unmarshal(raw, room)
+	})
+	return room, err
+}
+
+// LoadRooms returns all persisted rooms.
+func (ms *MessageStore) LoadRooms() ([]*messagepb.RoomInfo, error) {
+	var rooms []*messagepb.RoomInfo
+	err := ms.db.View(func(tx *bolt.Tx) error {
+		return tx.Bucket(bucketRooms).ForEach(func(_, v []byte) error {
+			room := &messagepb.RoomInfo{}
+			if err := proto.Unmarshal(v, room); err != nil {
+				return err
+			}
+			rooms = append(rooms, room)
+			return nil
+		})
+	})
+	return rooms, err
+}
+
+// StoreRoomEvent appends a room event and enforces a max retained event count.
+func (ms *MessageStore) StoreRoomEvent(event *messagepb.RoomEvent, maxEvents int) error {
+	raw, err := proto.Marshal(event)
+	if err != nil {
+		return fmt.Errorf("marshal room event: %w", err)
+	}
+
+	return ms.db.Update(func(tx *bolt.Tx) error {
+		root := tx.Bucket(bucketRoomLogs)
+		roomBucket, err := root.CreateBucketIfNotExists([]byte(event.RoomId))
+		if err != nil {
+			return err
+		}
+		if err := roomBucket.Put(roomSeqKey(event.RoomSeq), raw); err != nil {
+			return err
+		}
+		for maxEvents > 0 && countKeys(roomBucket) > maxEvents {
+			k, _ := roomBucket.Cursor().First()
+			if k == nil {
+				break
+			}
+			if err := roomBucket.Delete(k); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+}
+
+func countKeys(b *bolt.Bucket) int {
+	count := 0
+	c := b.Cursor()
+	for k, _ := c.First(); k != nil; k, _ = c.Next() {
+		count++
+	}
+	return count
+}
+
+// ReplayRoomEvents returns retained room events with sequence greater than sinceSeq.
+func (ms *MessageStore) ReplayRoomEvents(roomID string, sinceSeq uint64) ([]*messagepb.RoomEvent, error) {
+	var events []*messagepb.RoomEvent
+	err := ms.db.View(func(tx *bolt.Tx) error {
+		root := tx.Bucket(bucketRoomLogs)
+		if root == nil {
+			return nil
+		}
+		roomBucket := root.Bucket([]byte(roomID))
+		if roomBucket == nil {
+			return nil
+		}
+		c := roomBucket.Cursor()
+		for k, v := c.Seek(roomSeqKey(sinceSeq + 1)); k != nil; k, v = c.Next() {
+			event := &messagepb.RoomEvent{}
+			if err := proto.Unmarshal(v, event); err != nil {
+				return err
+			}
+			events = append(events, event)
+		}
+		return nil
+	})
+	return events, err
 }

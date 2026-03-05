@@ -13,6 +13,9 @@ from ._protocol import (
     Manifest,
     Message,
     Opened,
+    RoomEvent,
+    RoomInfo,
+    RoomPosted,
     Registered,
     Resolved,
     Sent,
@@ -174,9 +177,41 @@ class SyncAgent:
         assert self._async_agent is not None
         return self._run(self._async_agent.list_sessions())
 
+    def create_room(self, title: str, members: list[str] | None = None) -> str:
+        assert self._async_agent is not None
+        return self._run(self._async_agent.create_room(title, members))
+
+    def join_room(self, room_id: str) -> bool:
+        assert self._async_agent is not None
+        return self._run(self._async_agent.join_room(room_id))
+
+    def leave_room(self, room_id: str) -> bool:
+        assert self._async_agent is not None
+        return self._run(self._async_agent.leave_room(room_id))
+
+    def post_room_message(self, room_id: str, payload: str, *, content_type: str = "text/plain", trace_id: str = "") -> RoomPosted:
+        assert self._async_agent is not None
+        return self._run(self._async_agent.post_room_message(room_id, payload, content_type=content_type, trace_id=trace_id))
+
+    def list_rooms(self) -> list[RoomInfo]:
+        assert self._async_agent is not None
+        return self._run(self._async_agent.list_rooms())
+
+    def list_room_members(self, room_id: str) -> list[str]:
+        assert self._async_agent is not None
+        return self._run(self._async_agent.list_room_members(room_id))
+
+    def replay_room(self, room_id: str, *, since_seq: int = 0) -> list[RoomEvent]:
+        assert self._async_agent is not None
+        return self._run(self._async_agent.replay_room(room_id, since_seq=since_seq))
+
+    def close_room(self, room_id: str) -> bool:
+        assert self._async_agent is not None
+        return self._run(self._async_agent.close_room(room_id))
+
     # ── Message handling ────────────────────────────────────────────
 
-    def on_message(self, fn: Callable[[Message], None]) -> Callable[[Message], None]:
+    def on_message(self, fn: Callable[[Message | RoomEvent], None]) -> Callable[[Message | RoomEvent], None]:
         """Register a message handler (sync callback)."""
         assert self._async_agent is not None
         self._async_agent.on_message(fn)

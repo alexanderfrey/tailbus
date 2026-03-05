@@ -14,6 +14,7 @@ import (
 
 	agentpb "github.com/alexanderfrey/tailbus/api/agentpb"
 	messagepb "github.com/alexanderfrey/tailbus/api/messagepb"
+	transportpb "github.com/alexanderfrey/tailbus/api/transportpb"
 	"github.com/alexanderfrey/tailbus/internal/auth"
 	"github.com/alexanderfrey/tailbus/internal/config"
 	"github.com/alexanderfrey/tailbus/internal/handle"
@@ -55,6 +56,7 @@ type Daemon struct {
 	metrics     *Metrics
 	ackTracker  *AckTracker
 	msgStore    *MessageStore
+	roomManager *RoomManager
 }
 
 // New creates a new daemon from config.
@@ -137,9 +139,15 @@ func New(cfg *config.DaemonConfig, logger *slog.Logger) (*Daemon, error) {
 	router := NewMessageRouter(resolver, tp, agentSrv, activity, logger)
 	router.SetTracing(traceStore, metrics, cfg.NodeID)
 	agentSrv.router = router
+	roomManager := NewRoomManager(cfg.NodeID, resolver, tp, agentSrv, msgStore, logger)
+	agentSrv.SetRoomManager(roomManager)
 
 	// Create ACK tracker and wire into agent server + router
-	ackTracker := NewAckTracker(tp.Send, logger)
+	ackTracker := NewAckTracker(func(addr string, env *messagepb.Envelope) error {
+		return tp.Send(addr, &transportpb.TransportMessage{
+			Body: &transportpb.TransportMessage_Envelope{Envelope: env},
+		})
+	}, logger)
 	ackTracker.SetStore(msgStore)
 	agentSrv.SetAckTracker(ackTracker)
 	router.SetAckTracker(ackTracker)
@@ -147,20 +155,33 @@ func New(cfg *config.DaemonConfig, logger *slog.Logger) (*Daemon, error) {
 	d.agentServer = agentSrv
 	d.router = router
 	d.ackTracker = ackTracker
+	d.roomManager = roomManager
 
 	// Set up transport callbacks
-	tp.OnSend(func(env *messagepb.Envelope) {
-		if traceStore != nil && env.TraceId != "" {
-			traceStore.RecordSpan(env.TraceId, env.MessageId, cfg.NodeID, agentpb.TraceAction_TRACE_ACTION_SENT_TO_TRANSPORT, nil)
+	tp.OnSend(func(msg *transportpb.TransportMessage) {
+		env, ok := msg.Body.(*transportpb.TransportMessage_Envelope)
+		if !ok || env.Envelope == nil {
+			return
+		}
+		if traceStore != nil && env.Envelope.TraceId != "" {
+			traceStore.RecordSpan(env.Envelope.TraceId, env.Envelope.MessageId, cfg.NodeID, agentpb.TraceAction_TRACE_ACTION_SENT_TO_TRANSPORT, nil)
 		}
 	})
-	tp.OnReceive(func(env *messagepb.Envelope) {
-		if traceStore != nil && env.TraceId != "" {
-			traceStore.RecordSpan(env.TraceId, env.MessageId, cfg.NodeID, agentpb.TraceAction_TRACE_ACTION_RECEIVED_FROM_TRANSPORT, nil)
+	tp.OnReceive(func(msg *transportpb.TransportMessage) {
+		switch body := msg.Body.(type) {
+		case *transportpb.TransportMessage_Envelope:
+			if body.Envelope == nil {
+				return
+			}
+			if traceStore != nil && body.Envelope.TraceId != "" {
+				traceStore.RecordSpan(body.Envelope.TraceId, body.Envelope.MessageId, cfg.NodeID, agentpb.TraceAction_TRACE_ACTION_RECEIVED_FROM_TRANSPORT, nil)
+			}
+			agentSrv.DeliverToLocal(body.Envelope)
+			activity.MessagesReceivedRemote.Add(1)
+			activity.EmitMessageRouted(body.Envelope.SessionId, body.Envelope.FromHandle, body.Envelope.ToHandle, false, body.Envelope.TraceId, body.Envelope.MessageId)
+		default:
+			roomManager.HandleTransportMessage(context.Background(), msg)
 		}
-		agentSrv.DeliverToLocal(env)
-		activity.MessagesReceivedRemote.Add(1)
-		activity.EmitMessageRouted(env.SessionId, env.FromHandle, env.ToHandle, false, env.TraceId, env.MessageId)
 	})
 
 	return d, nil
@@ -327,6 +348,7 @@ func (d *Daemon) Run(ctx context.Context) error {
 		d.logger.Info("team mode enabled", "team_id", teamID)
 	}
 	d.coordClient = cc
+	d.roomManager.SetCoordClient(cc)
 	defer cc.Close()
 
 	// Set up token refresh callback for JWT-authenticated connections

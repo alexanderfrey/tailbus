@@ -323,6 +323,41 @@ func (s *Server) LookupHandle(_ context.Context, req *pb.LookupHandleRequest) (*
 	}, nil
 }
 
+// UpsertRoom stores room discovery metadata for routing and membership lookup.
+func (s *Server) UpsertRoom(_ context.Context, req *pb.UpsertRoomRequest) (*pb.UpsertRoomResponse, error) {
+	if req.Room == nil {
+		return &pb.UpsertRoomResponse{Ok: false, Error: "room is required"}, nil
+	}
+	if err := s.store.UpsertRoom(req.Room, req.TeamId); err != nil {
+		return &pb.UpsertRoomResponse{Ok: false, Error: err.Error()}, nil
+	}
+	if err := s.peerMap.Broadcast(); err != nil {
+		s.logger.Error("failed to broadcast peer map after room upsert", "error", err)
+	}
+	return &pb.UpsertRoomResponse{Ok: true}, nil
+}
+
+// LookupRoom looks up room discovery metadata by ID.
+func (s *Server) LookupRoom(_ context.Context, req *pb.LookupRoomRequest) (*pb.LookupRoomResponse, error) {
+	room, err := s.store.LookupRoom(req.RoomId, req.TeamId)
+	if err != nil {
+		return nil, err
+	}
+	if room == nil {
+		return &pb.LookupRoomResponse{Found: false}, nil
+	}
+	return &pb.LookupRoomResponse{Found: true, Room: room}, nil
+}
+
+// ListRoomsForHandle lists room discovery metadata for a member handle.
+func (s *Server) ListRoomsForHandle(_ context.Context, req *pb.ListRoomsForHandleRequest) (*pb.ListRoomsForHandleResponse, error) {
+	rooms, err := s.store.ListRoomsForHandle(req.Handle, req.TeamId)
+	if err != nil {
+		return nil, err
+	}
+	return &pb.ListRoomsForHandleResponse{Rooms: rooms}, nil
+}
+
 // Heartbeat handles node heartbeats.
 func (s *Server) Heartbeat(_ context.Context, req *pb.HeartbeatRequest) (*pb.HeartbeatResponse, error) {
 	manifests := req.HandleManifests

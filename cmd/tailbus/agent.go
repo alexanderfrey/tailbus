@@ -36,6 +36,10 @@ type inboundCmd struct {
 	Tags        []string     `json:"tags,omitempty"` // for list command
 	To          string       `json:"to,omitempty"`
 	Session     string       `json:"session,omitempty"`
+	RoomID      string       `json:"room_id,omitempty"`
+	Title       string       `json:"title,omitempty"`
+	Members     []string     `json:"members,omitempty"`
+	SinceSeq    uint64       `json:"since_seq,omitempty"`
 	Payload     string       `json:"payload,omitempty"`
 	ContentType string       `json:"content_type,omitempty"`
 	TraceID     string       `json:"trace_id,omitempty"`
@@ -100,6 +104,64 @@ type messageResp struct {
 	TraceID     string `json:"trace_id"`
 	MessageID   string `json:"message_id"`
 	SentAt      int64  `json:"sent_at"`
+}
+
+type roomEventResp struct {
+	Type        string   `json:"type"`
+	RoomID      string   `json:"room_id"`
+	RoomSeq     uint64   `json:"room_seq"`
+	Sender      string   `json:"sender"`
+	Subject     string   `json:"subject,omitempty"`
+	Payload     string   `json:"payload"`
+	ContentType string   `json:"content_type"`
+	EventType   string   `json:"event_type"`
+	TraceID     string   `json:"trace_id"`
+	EventID     string   `json:"event_id"`
+	SentAt      int64    `json:"sent_at"`
+	Members     []string `json:"members,omitempty"`
+}
+
+type roomCreatedResp struct {
+	Type   string `json:"type"`
+	RoomID string `json:"room_id"`
+}
+
+type roomPostedResp struct {
+	Type    string `json:"type"`
+	EventID string `json:"event_id"`
+	RoomSeq uint64 `json:"room_seq"`
+}
+
+type roomOpResp struct {
+	Type string `json:"type"`
+	Ok   bool   `json:"ok"`
+}
+
+type roomInfoResp struct {
+	RoomID     string   `json:"room_id"`
+	Title      string   `json:"title"`
+	CreatedBy  string   `json:"created_by"`
+	HomeNodeID string   `json:"home_node_id"`
+	Members    []string `json:"members"`
+	Status     string   `json:"status"`
+	NextSeq    uint64   `json:"next_seq"`
+	CreatedAt  int64    `json:"created_at"`
+	UpdatedAt  int64    `json:"updated_at"`
+}
+
+type roomsResp struct {
+	Type  string         `json:"type"`
+	Rooms []roomInfoResp `json:"rooms"`
+}
+
+type roomMembersResp struct {
+	Type    string   `json:"type"`
+	Members []string `json:"members"`
+}
+
+type roomReplayResp struct {
+	Type   string          `json:"type"`
+	Events []roomEventResp `json:"events"`
 }
 
 type sessionItem struct {
@@ -168,6 +230,52 @@ func protoManifestToResp(m *messagepb.ServiceManifest) *introspectManifestResp {
 		})
 	}
 	return resp
+}
+
+func roomEventTypeString(t messagepb.RoomEventType) string {
+	switch t {
+	case messagepb.RoomEventType_ROOM_EVENT_TYPE_MEMBER_JOINED:
+		return "member_joined"
+	case messagepb.RoomEventType_ROOM_EVENT_TYPE_MEMBER_LEFT:
+		return "member_left"
+	case messagepb.RoomEventType_ROOM_EVENT_TYPE_MESSAGE_POSTED:
+		return "message_posted"
+	case messagepb.RoomEventType_ROOM_EVENT_TYPE_ROOM_CLOSED:
+		return "room_closed"
+	default:
+		return "unknown"
+	}
+}
+
+func protoRoomEventToResp(event *messagepb.RoomEvent) roomEventResp {
+	return roomEventResp{
+		Type:        "room_event",
+		RoomID:      event.RoomId,
+		RoomSeq:     event.RoomSeq,
+		Sender:      event.SenderHandle,
+		Subject:     event.SubjectHandle,
+		Payload:     string(event.Payload),
+		ContentType: event.ContentType,
+		EventType:   roomEventTypeString(event.Type),
+		TraceID:     event.TraceId,
+		EventID:     event.EventId,
+		SentAt:      event.SentAtUnix,
+		Members:     event.Members,
+	}
+}
+
+func protoRoomInfoToResp(room *messagepb.RoomInfo) roomInfoResp {
+	return roomInfoResp{
+		RoomID:     room.RoomId,
+		Title:      room.Title,
+		CreatedBy:  room.CreatedBy,
+		HomeNodeID: room.HomeNodeId,
+		Members:    room.Members,
+		Status:     room.Status,
+		NextSeq:    room.NextSeq,
+		CreatedAt:  room.CreatedAtUnix,
+		UpdatedAt:  room.UpdatedAtUnix,
+	}
 }
 
 func runAgent(client agentpb.AgentAPIClient, logger *slog.Logger) error {
@@ -268,19 +376,22 @@ func runAgent(client agentpb.AgentAPIClient, logger *slog.Logger) error {
 							logger.Error("subscribe stream error", "error", err)
 							return
 						}
-						env := msg.Envelope
-						w.Write(messageResp{
-							Type:        "message",
-							Session:     env.SessionId,
-							From:        env.FromHandle,
-							To:          env.ToHandle,
-							Payload:     string(env.Payload),
-							ContentType: env.ContentType,
-							MessageType: envelopeTypeString(env.Type),
-							TraceID:     env.TraceId,
-							MessageID:   env.MessageId,
-							SentAt:      env.SentAtUnix,
-						})
+						if env := msg.Envelope; env != nil {
+							w.Write(messageResp{
+								Type:        "message",
+								Session:     env.SessionId,
+								From:        env.FromHandle,
+								To:          env.ToHandle,
+								Payload:     string(env.Payload),
+								ContentType: env.ContentType,
+								MessageType: envelopeTypeString(env.Type),
+								TraceID:     env.TraceId,
+								MessageID:   env.MessageId,
+								SentAt:      env.SentAtUnix,
+							})
+						} else if event := msg.RoomEvent; event != nil {
+							w.Write(protoRoomEventToResp(event))
+						}
 					}
 				}()
 
@@ -380,6 +491,124 @@ func runAgent(client agentpb.AgentAPIClient, logger *slog.Logger) error {
 					})
 				}
 				w.Write(sessionsResp{Type: "sessions", Sessions: items})
+
+			case "create_room":
+				if handle == "" {
+					w.Write(errorResp{Type: "error", Error: "must register first", RequestType: "create_room"})
+					continue
+				}
+				resp, err := client.CreateRoom(ctx, &agentpb.CreateRoomRequest{
+					CreatorHandle:  handle,
+					Title:          cmd.Title,
+					InitialMembers: cmd.Members,
+				})
+				if err != nil {
+					w.Write(errorResp{Type: "error", Error: err.Error(), RequestType: "create_room"})
+					continue
+				}
+				w.Write(roomCreatedResp{Type: "room_created", RoomID: resp.RoomId})
+
+			case "join_room":
+				if handle == "" {
+					w.Write(errorResp{Type: "error", Error: "must register first", RequestType: "join_room"})
+					continue
+				}
+				resp, err := client.JoinRoom(ctx, &agentpb.JoinRoomRequest{RoomId: cmd.RoomID, Handle: handle})
+				if err != nil {
+					w.Write(errorResp{Type: "error", Error: err.Error(), RequestType: "join_room"})
+					continue
+				}
+				w.Write(roomOpResp{Type: "room_joined", Ok: resp.Ok})
+
+			case "leave_room":
+				if handle == "" {
+					w.Write(errorResp{Type: "error", Error: "must register first", RequestType: "leave_room"})
+					continue
+				}
+				resp, err := client.LeaveRoom(ctx, &agentpb.LeaveRoomRequest{RoomId: cmd.RoomID, Handle: handle})
+				if err != nil {
+					w.Write(errorResp{Type: "error", Error: err.Error(), RequestType: "leave_room"})
+					continue
+				}
+				w.Write(roomOpResp{Type: "room_left", Ok: resp.Ok})
+
+			case "post_room":
+				if handle == "" {
+					w.Write(errorResp{Type: "error", Error: "must register first", RequestType: "post_room"})
+					continue
+				}
+				ct := cmd.ContentType
+				if ct == "" {
+					ct = "text/plain"
+				}
+				resp, err := client.PostRoomMessage(ctx, &agentpb.PostRoomMessageRequest{
+					RoomId:      cmd.RoomID,
+					FromHandle:  handle,
+					Payload:     []byte(cmd.Payload),
+					ContentType: ct,
+					TraceId:     cmd.TraceID,
+				})
+				if err != nil {
+					w.Write(errorResp{Type: "error", Error: err.Error(), RequestType: "post_room"})
+					continue
+				}
+				w.Write(roomPostedResp{Type: "room_posted", EventID: resp.EventId, RoomSeq: resp.RoomSeq})
+
+			case "list_rooms":
+				if handle == "" {
+					w.Write(errorResp{Type: "error", Error: "must register first", RequestType: "list_rooms"})
+					continue
+				}
+				resp, err := client.ListRooms(ctx, &agentpb.ListRoomsRequest{Handle: handle})
+				if err != nil {
+					w.Write(errorResp{Type: "error", Error: err.Error(), RequestType: "list_rooms"})
+					continue
+				}
+				rooms := make([]roomInfoResp, 0, len(resp.Rooms))
+				for _, room := range resp.Rooms {
+					rooms = append(rooms, protoRoomInfoToResp(room))
+				}
+				w.Write(roomsResp{Type: "rooms", Rooms: rooms})
+
+			case "room_members":
+				if handle == "" {
+					w.Write(errorResp{Type: "error", Error: "must register first", RequestType: "room_members"})
+					continue
+				}
+				resp, err := client.ListRoomMembers(ctx, &agentpb.ListRoomMembersRequest{RoomId: cmd.RoomID, Handle: handle})
+				if err != nil {
+					w.Write(errorResp{Type: "error", Error: err.Error(), RequestType: "room_members"})
+					continue
+				}
+				w.Write(roomMembersResp{Type: "room_members", Members: resp.Members})
+
+			case "replay_room":
+				if handle == "" {
+					w.Write(errorResp{Type: "error", Error: "must register first", RequestType: "replay_room"})
+					continue
+				}
+				resp, err := client.ReplayRoom(ctx, &agentpb.ReplayRoomRequest{RoomId: cmd.RoomID, Handle: handle, SinceSeq: cmd.SinceSeq})
+				if err != nil {
+					w.Write(errorResp{Type: "error", Error: err.Error(), RequestType: "replay_room"})
+					continue
+				}
+				events := make([]roomEventResp, 0, len(resp.Events))
+				for _, event := range resp.Events {
+					events = append(events, protoRoomEventToResp(event))
+				}
+				w.Write(roomReplayResp{Type: "room_replay", Events: events})
+
+			case "close_room":
+				if handle == "" {
+					w.Write(errorResp{Type: "error", Error: "must register first", RequestType: "close_room"})
+					continue
+				}
+				resp, err := client.CloseRoom(ctx, &agentpb.CloseRoomRequest{RoomId: cmd.RoomID, Handle: handle})
+				if err != nil {
+					w.Write(errorResp{Type: "error", Error: err.Error(), RequestType: "close_room"})
+					continue
+				}
+				w.Write(roomOpResp{Type: "room_closed", Ok: resp.Ok})
 
 			case "introspect":
 				if cmd.Handle == "" {

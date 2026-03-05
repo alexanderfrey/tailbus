@@ -27,6 +27,76 @@ message Envelope {
   bytes relay_target_key = 12;  // Target node pubkey (set by sender when routing via relay)
 }
 
+message RoomInfo {
+  string room_id = 1;
+  string title = 2;
+  string created_by = 3;
+  string home_node_id = 4;
+  repeated string members = 5;
+  string status = 6;
+  uint64 next_seq = 7;
+  int64 created_at_unix = 8;
+  int64 updated_at_unix = 9;
+}
+
+enum RoomEventType {
+  ROOM_EVENT_TYPE_UNSPECIFIED = 0;
+  ROOM_EVENT_TYPE_MEMBER_JOINED = 1;
+  ROOM_EVENT_TYPE_MEMBER_LEFT = 2;
+  ROOM_EVENT_TYPE_MESSAGE_POSTED = 3;
+  ROOM_EVENT_TYPE_ROOM_CLOSED = 4;
+}
+
+message RoomEvent {
+  string event_id = 1;
+  string room_id = 2;
+  uint64 room_seq = 3;
+  string sender_handle = 4;
+  string subject_handle = 5;
+  bytes payload = 6;
+  string content_type = 7;
+  int64 sent_at_unix = 8;
+  RoomEventType type = 9;
+  string trace_id = 10;
+  repeated string members = 11;
+}
+
+enum RoomCommandType {
+  ROOM_COMMAND_TYPE_UNSPECIFIED = 0;
+  ROOM_COMMAND_TYPE_CREATE = 1;
+  ROOM_COMMAND_TYPE_JOIN = 2;
+  ROOM_COMMAND_TYPE_LEAVE = 3;
+  ROOM_COMMAND_TYPE_POST = 4;
+  ROOM_COMMAND_TYPE_REPLAY = 5;
+  ROOM_COMMAND_TYPE_LIST_MEMBERS = 6;
+  ROOM_COMMAND_TYPE_CLOSE = 7;
+}
+
+message RoomCommand {
+  string request_id = 1;
+  RoomCommandType type = 2;
+  string room_id = 3;
+  string requester_handle = 4;
+  string title = 5;
+  repeated string members = 6;
+  string subject_handle = 7;
+  bytes payload = 8;
+  string content_type = 9;
+  string trace_id = 10;
+  uint64 since_seq = 11;
+  string requester_node_id = 12;
+}
+
+message RoomCommandResult {
+  string request_id = 1;
+  bool ok = 2;
+  string error = 3;
+  RoomInfo room = 4;
+  RoomEvent event = 5;
+  repeated RoomEvent events = 6;
+  repeated string members = 7;
+}
+
 message CommandSpec {
   string name = 1;
   string description = 2;

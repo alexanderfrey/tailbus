@@ -175,12 +175,58 @@ func (c *CoordClient) WatchPeerMap(ctx context.Context) error {
 		}
 		c.resolver.UpdateRelays(relayInfos)
 
+		rooms := make(map[string]handle.RoomInfo)
+		for _, room := range update.Rooms {
+			if room == nil {
+				continue
+			}
+			rooms[room.RoomId] = handle.RoomInfo{
+				RoomID:     room.RoomId,
+				Title:      room.Title,
+				CreatedBy:  room.CreatedBy,
+				HomeNodeID: room.HomeNodeId,
+				Members:    append([]string(nil), room.Members...),
+				Status:     room.Status,
+				NextSeq:    room.NextSeq,
+				CreatedAt:  room.CreatedAtUnix,
+				UpdatedAt:  room.UpdatedAtUnix,
+			}
+		}
+		c.resolver.UpdateRooms(rooms)
+
 		if len(relayInfos) > 0 && c.onRelayUpdate != nil {
 			c.onRelayUpdate()
 		}
 
 		c.logger.Info("peer map updated", "version", update.Version, "peers", len(update.Peers), "relays", len(update.Relays))
 	}
+}
+
+// UpsertRoom stores room discovery metadata in the coordination server.
+func (c *CoordClient) UpsertRoom(ctx context.Context, room *messagepb.RoomInfo) error {
+	resp, err := c.client.UpsertRoom(ctx, &pb.UpsertRoomRequest{
+		Room:   room,
+		TeamId: c.teamID,
+	})
+	if err != nil {
+		return fmt.Errorf("upsert room: %w", err)
+	}
+	if !resp.Ok {
+		return fmt.Errorf("upsert room rejected: %s", resp.Error)
+	}
+	return nil
+}
+
+// ListRoomsForHandle returns coord-scoped room metadata for a handle.
+func (c *CoordClient) ListRoomsForHandle(ctx context.Context, handle string) ([]*messagepb.RoomInfo, error) {
+	resp, err := c.client.ListRoomsForHandle(ctx, &pb.ListRoomsForHandleRequest{
+		Handle: handle,
+		TeamId: c.teamID,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("list rooms for handle: %w", err)
+	}
+	return resp.Rooms, nil
 }
 
 // Heartbeat sends periodic heartbeats to the coordination server.

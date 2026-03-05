@@ -11,7 +11,6 @@ import (
 	"sync"
 	"time"
 
-	messagepb "github.com/alexanderfrey/tailbus/api/messagepb"
 	transportpb "github.com/alexanderfrey/tailbus/api/transportpb"
 	"github.com/alexanderfrey/tailbus/internal/handle"
 	"github.com/alexanderfrey/tailbus/internal/identity"
@@ -27,8 +26,8 @@ type GRPCTransport struct {
 
 	logger    *slog.Logger
 	grpcSrv   *grpc.Server
-	receiveFn func(*messagepb.Envelope)
-	sendFn    func(*messagepb.Envelope)
+	receiveFn func(*transportpb.TransportMessage)
+	sendFn    func(*transportpb.TransportMessage)
 
 	tlsCert  *tls.Certificate // nil = insecure
 	verifier PeerVerifier     // nil = no peer verification
@@ -103,12 +102,12 @@ func (t *GRPCTransport) Serve(lis net.Listener) error {
 }
 
 // OnReceive registers the callback for incoming envelopes.
-func (t *GRPCTransport) OnReceive(fn func(*messagepb.Envelope)) {
+func (t *GRPCTransport) OnReceive(fn func(*transportpb.TransportMessage)) {
 	t.receiveFn = fn
 }
 
 // OnSend registers a callback invoked after a successful send to a peer.
-func (t *GRPCTransport) OnSend(fn func(*messagepb.Envelope)) {
+func (t *GRPCTransport) OnSend(fn func(*transportpb.TransportMessage)) {
 	t.sendFn = fn
 }
 
@@ -127,7 +126,7 @@ const directFailTTL = 60 * time.Second
 
 // Send sends an envelope to a peer. Establishes connection lazily.
 // On send failure, falls back to relay if available.
-func (t *GRPCTransport) Send(addr string, env *messagepb.Envelope) error {
+func (t *GRPCTransport) Send(addr string, msg *transportpb.TransportMessage) error {
 	// Check if direct connection to this addr recently failed
 	t.relayMu.Lock()
 	failTime, directFailed := t.directFails[addr]
@@ -138,7 +137,7 @@ func (t *GRPCTransport) Send(addr string, env *messagepb.Envelope) error {
 	t.relayMu.Unlock()
 
 	if !directFailed {
-		err := t.sendDirect(addr, env)
+		err := t.sendDirect(addr, msg)
 		if err == nil {
 			return nil
 		}
@@ -153,23 +152,23 @@ func (t *GRPCTransport) Send(addr string, env *messagepb.Envelope) error {
 	if t.resolver == nil {
 		return fmt.Errorf("direct send to %s failed and no resolver for relay fallback", addr)
 	}
-	return t.sendViaRelay(addr, env)
+	return t.sendViaRelay(addr, msg)
 }
 
-// sendDirect sends an envelope directly to a peer (original Send logic).
-func (t *GRPCTransport) sendDirect(addr string, env *messagepb.Envelope) error {
+// sendDirect sends a transport message directly to a peer.
+func (t *GRPCTransport) sendDirect(addr string, msg *transportpb.TransportMessage) error {
 	pc, err := t.getOrConnect(addr)
 	if err != nil {
 		return err
 	}
 
 	pc.mu.Lock()
-	err = pc.stream.Send(env)
+	err = pc.stream.Send(msg)
 	pc.mu.Unlock()
 
 	if err == nil {
 		if t.sendFn != nil {
-			t.sendFn(env)
+			t.sendFn(msg)
 		}
 		return nil
 	}
@@ -192,25 +191,25 @@ func (t *GRPCTransport) sendDirect(addr string, env *messagepb.Envelope) error {
 
 	pc2.mu.Lock()
 	defer pc2.mu.Unlock()
-	if err := pc2.stream.Send(env); err != nil {
+	if err := pc2.stream.Send(msg); err != nil {
 		return err
 	}
 	if t.sendFn != nil {
-		t.sendFn(env)
+		t.sendFn(msg)
 	}
 	return nil
 }
 
-// sendViaRelay sends an envelope through a relay server.
-func (t *GRPCTransport) sendViaRelay(peerAddr string, env *messagepb.Envelope) error {
+// sendViaRelay sends a transport message through a relay server.
+func (t *GRPCTransport) sendViaRelay(peerAddr string, msg *transportpb.TransportMessage) error {
 	// Look up the target's pubkey from the resolver by matching addr
 	targetKey := t.pubkeyForAddr(peerAddr)
 	if targetKey == nil {
 		return fmt.Errorf("cannot find pubkey for peer %s for relay routing", peerAddr)
 	}
 
-	// Stamp relay target key on the envelope
-	env.RelayTargetKey = targetKey
+	// Stamp relay target key on the transport wrapper.
+	msg.RelayTargetKey = targetKey
 
 	relays := t.resolver.GetRelays()
 	if len(relays) == 0 {
@@ -225,14 +224,14 @@ func (t *GRPCTransport) sendViaRelay(peerAddr string, env *messagepb.Envelope) e
 			continue
 		}
 		pc.mu.Lock()
-		err = pc.stream.Send(env)
+		err = pc.stream.Send(msg)
 		pc.mu.Unlock()
 		if err != nil {
 			t.logger.Warn("relay send failed", "relay", relay.Addr, "error", err)
 			continue
 		}
 		if t.sendFn != nil {
-			t.sendFn(env)
+			t.sendFn(msg)
 		}
 		t.logger.Debug("sent via relay", "relay", relay.Addr, "target", peerAddr)
 		return nil
@@ -324,7 +323,7 @@ func (t *GRPCTransport) connectRelay(addr string) (*peerConn, error) {
 // relayRecvLoop receives envelopes from a relay connection.
 func (t *GRPCTransport) relayRecvLoop(addr string, pc *peerConn, stream transportpb.NodeTransport_ExchangeClient) {
 	for {
-		env, err := stream.Recv()
+		msg, err := stream.Recv()
 		if err != nil {
 			t.logger.Debug("relay stream closed", "addr", addr, "error", err)
 			t.relayMu.Lock()
@@ -336,9 +335,9 @@ func (t *GRPCTransport) relayRecvLoop(addr string, pc *peerConn, stream transpor
 			return
 		}
 		// Clear relay_target_key before delivering (it was for the relay)
-		env.RelayTargetKey = nil
+		msg.RelayTargetKey = nil
 		if t.receiveFn != nil {
-			t.receiveFn(env)
+			t.receiveFn(msg)
 		}
 	}
 }
@@ -419,7 +418,7 @@ func (t *GRPCTransport) connectLocked(addr string) (*peerConn, error) {
 
 func (t *GRPCTransport) recvLoop(addr string, pc *peerConn, stream transportpb.NodeTransport_ExchangeClient) {
 	for {
-		env, err := stream.Recv()
+		msg, err := stream.Recv()
 		if err != nil {
 			t.logger.Debug("peer stream closed", "addr", addr, "error", err)
 			// Clean up the peer entry, but only if it's still the same connection
@@ -433,7 +432,7 @@ func (t *GRPCTransport) recvLoop(addr string, pc *peerConn, stream transportpb.N
 			return
 		}
 		if t.receiveFn != nil {
-			t.receiveFn(env)
+			t.receiveFn(msg)
 		}
 	}
 }
@@ -441,12 +440,12 @@ func (t *GRPCTransport) recvLoop(addr string, pc *peerConn, stream transportpb.N
 // Exchange handles incoming bidirectional streams from other daemons.
 func (t *GRPCTransport) Exchange(stream transportpb.NodeTransport_ExchangeServer) error {
 	for {
-		env, err := stream.Recv()
+		msg, err := stream.Recv()
 		if err != nil {
 			return err
 		}
 		if t.receiveFn != nil {
-			t.receiveFn(env)
+			t.receiveFn(msg)
 		}
 	}
 }

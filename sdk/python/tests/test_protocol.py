@@ -14,6 +14,12 @@ from tailbus._protocol import (
     Opened,
     Registered,
     Resolved,
+    RoomCreated,
+    RoomEvent,
+    RoomList,
+    RoomMembers,
+    RoomPosted,
+    RoomReplay,
     Sent,
     SessionInfo,
     SessionList,
@@ -123,6 +129,88 @@ class TestParseMessage(unittest.TestCase):
         self.assertEqual(resp.content_type, "text/plain")
         self.assertEqual(resp.message_type, "message")
         self.assertEqual(resp.sent_at, 0)
+
+
+class TestParseRoomResponses(unittest.TestCase):
+    def test_parse_room_event(self) -> None:
+        resp = parse_response(
+            json.dumps(
+                {
+                    "type": "room_event",
+                    "room_id": "room-1",
+                    "room_seq": 2,
+                    "sender": "alice",
+                    "subject": "bob",
+                    "payload": "joined",
+                    "content_type": "text/plain",
+                    "event_type": "member_joined",
+                    "trace_id": "trace-1",
+                    "event_id": "evt-1",
+                    "sent_at": 1700000000,
+                    "members": ["alice", "bob"],
+                }
+            )
+        )
+        self.assertIsInstance(resp, RoomEvent)
+        assert isinstance(resp, RoomEvent)
+        self.assertEqual(resp.room_id, "room-1")
+        self.assertEqual(resp.room_seq, 2)
+        self.assertEqual(resp.members, ("alice", "bob"))
+
+    def test_parse_room_created_and_posted(self) -> None:
+        created = parse_response('{"type":"room_created","room_id":"room-1"}')
+        self.assertIsInstance(created, RoomCreated)
+        posted = parse_response('{"type":"room_posted","event_id":"evt-1","room_seq":3}')
+        self.assertIsInstance(posted, RoomPosted)
+
+    def test_parse_room_lists(self) -> None:
+        rooms = parse_response(
+            json.dumps(
+                {
+                    "type": "rooms",
+                    "rooms": [
+                        {
+                            "room_id": "room-1",
+                            "title": "design-review",
+                            "created_by": "alice",
+                            "home_node_id": "node-1",
+                            "members": ["alice", "bob"],
+                            "status": "open",
+                            "next_seq": 4,
+                            "created_at": 1,
+                            "updated_at": 2,
+                        }
+                    ],
+                }
+            )
+        )
+        self.assertIsInstance(rooms, RoomList)
+        assert isinstance(rooms, RoomList)
+        self.assertEqual(rooms.rooms[0].title, "design-review")
+
+        members = parse_response('{"type":"room_members","members":["alice","bob"]}')
+        self.assertIsInstance(members, RoomMembers)
+
+        replay = parse_response(
+            json.dumps(
+                {
+                    "type": "room_replay",
+                    "events": [
+                        {
+                            "room_id": "room-1",
+                            "room_seq": 1,
+                            "sender": "alice",
+                            "payload": "hello",
+                            "content_type": "text/plain",
+                            "event_type": "message_posted",
+                            "event_id": "evt-1",
+                            "sent_at": 3,
+                        }
+                    ],
+                }
+            )
+        )
+        self.assertIsInstance(replay, RoomReplay)
 
 
 class TestParseIntrospected(unittest.TestCase):

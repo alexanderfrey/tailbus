@@ -42,18 +42,33 @@ type NodeInfo struct {
 	PublicKey     []byte
 }
 
+// RoomInfo holds discovery metadata for a shared room.
+type RoomInfo struct {
+	RoomID      string
+	Title       string
+	CreatedBy   string
+	HomeNodeID  string
+	Members     []string
+	Status      string
+	NextSeq     uint64
+	CreatedAt   int64
+	UpdatedAt   int64
+}
+
 // Resolver resolves handle names to peer info using a cached peer map.
 type Resolver struct {
 	mu       sync.RWMutex
 	handleTo map[string]PeerInfo // handle name -> peer info
 	nodes    []NodeInfo          // all peer nodes (including those with no handles)
 	relays   []RelayInfo
+	rooms    map[string]RoomInfo
 }
 
 // NewResolver creates a new resolver.
 func NewResolver() *Resolver {
 	return &Resolver{
 		handleTo: make(map[string]PeerInfo),
+		rooms:    make(map[string]RoomInfo),
 	}
 }
 
@@ -104,6 +119,40 @@ func (r *Resolver) GetRelays() []RelayInfo {
 	defer r.mu.RUnlock()
 	result := make([]RelayInfo, len(r.relays))
 	copy(result, r.relays)
+	return result
+}
+
+// UpdateRooms replaces the cached room map.
+func (r *Resolver) UpdateRooms(rooms map[string]RoomInfo) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.rooms = rooms
+}
+
+// ResolveRoom looks up a room by ID in the cached room map.
+func (r *Resolver) ResolveRoom(roomID string) (RoomInfo, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	info, ok := r.rooms[roomID]
+	if !ok {
+		return RoomInfo{}, fmt.Errorf("room %q not found in peer map", roomID)
+	}
+	return info, nil
+}
+
+// ListRoomsForMember returns all cached rooms that include the given handle.
+func (r *Resolver) ListRoomsForMember(handle string) []RoomInfo {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	var result []RoomInfo
+	for _, room := range r.rooms {
+		for _, member := range room.Members {
+			if member == handle {
+				result = append(result, room)
+				break
+			}
+		}
+	}
 	return result
 }
 

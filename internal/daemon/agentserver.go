@@ -66,6 +66,17 @@ type Router interface {
 	Route(ctx context.Context, env *messagepb.Envelope) error
 }
 
+type RoomService interface {
+	CreateRoom(ctx context.Context, creator, title string, initialMembers []string) (*messagepb.RoomInfo, error)
+	JoinRoom(ctx context.Context, roomID, handle string) (*messagepb.RoomInfo, error)
+	LeaveRoom(ctx context.Context, roomID, handle string) (*messagepb.RoomInfo, error)
+	PostMessage(ctx context.Context, roomID, from string, payload []byte, contentType, traceID string) (*messagepb.RoomEvent, error)
+	ListRooms(ctx context.Context, handle string) ([]*messagepb.RoomInfo, error)
+	ListMembers(ctx context.Context, roomID, handle string) ([]string, error)
+	Replay(ctx context.Context, roomID, handle string, sinceSeq uint64) ([]*messagepb.RoomEvent, error)
+	CloseRoom(ctx context.Context, roomID, handle string) (*messagepb.RoomInfo, error)
+}
+
 // AgentServer is the local gRPC server that agent programs connect to via Unix socket.
 type AgentServer struct {
 	agentpb.UnimplementedAgentAPIServer
@@ -97,6 +108,8 @@ type AgentServer struct {
 
 	// ACK tracking
 	ackTracker *AckTracker
+
+	roomManager RoomService
 
 	// Shutdown callback (set via SetShutdownFunc)
 	shutdownFn func()
@@ -205,6 +218,11 @@ func (s *AgentServer) SetTracing(ts *TraceStore, m *Metrics) {
 // SetAckTracker sets the ACK tracker for delivery acknowledgement.
 func (s *AgentServer) SetAckTracker(at *AckTracker) {
 	s.ackTracker = at
+}
+
+// SetRoomManager sets the room manager used by room RPCs.
+func (s *AgentServer) SetRoomManager(rm RoomService) {
+	s.roomManager = rm
 }
 
 // ServeUnix starts the gRPC server on a Unix socket.
@@ -423,6 +441,39 @@ func (s *AgentServer) DeliverToLocal(env *messagepb.Envelope) bool {
 	}
 
 	return true
+}
+
+// DeliverRoomEventLocal delivers a room event to all local room members except the sender.
+func (s *AgentServer) DeliverRoomEventLocal(event *messagepb.RoomEvent) bool {
+	delivered := false
+	for _, member := range event.Members {
+		if member == event.SenderHandle || !s.HasHandle(member) {
+			continue
+		}
+		s.mu.RLock()
+		subs := s.subscribers[member]
+		hs := s.hstats[member]
+		s.mu.RUnlock()
+		if len(subs) == 0 {
+			continue
+		}
+		msg := &agentpb.IncomingMessage{RoomEvent: event}
+		for _, ch := range subs {
+			select {
+			case ch <- msg:
+				delivered = true
+				if hs != nil {
+					hs.msgsIn.Add(1)
+				}
+			default:
+				s.logger.Warn("subscriber channel full, dropping room event", "handle", member, "room_id", event.RoomId)
+				if hs != nil {
+					hs.drops.Add(1)
+				}
+			}
+		}
+	}
+	return delivered
 }
 
 // HasHandle returns true if the given handle is registered locally.
@@ -746,6 +797,115 @@ func (s *AgentServer) ResolveSession(ctx context.Context, req *agentpb.ResolveSe
 
 	s.logger.Info("session resolved", "session_id", req.SessionId)
 	return &agentpb.ResolveSessionResponse{MessageId: msgID}, nil
+}
+
+func (s *AgentServer) CreateRoom(ctx context.Context, req *agentpb.CreateRoomRequest) (*agentpb.CreateRoomResponse, error) {
+	if s.roomManager == nil {
+		return nil, status.Error(codes.Unimplemented, "rooms are not configured")
+	}
+	if err := s.verifyOwnership(ctx, req.CreatorHandle); err != nil {
+		return nil, err
+	}
+	room, err := s.roomManager.CreateRoom(ctx, req.CreatorHandle, req.Title, req.InitialMembers)
+	if err != nil {
+		return nil, err
+	}
+	return &agentpb.CreateRoomResponse{RoomId: room.RoomId}, nil
+}
+
+func (s *AgentServer) JoinRoom(ctx context.Context, req *agentpb.JoinRoomRequest) (*agentpb.JoinRoomResponse, error) {
+	if s.roomManager == nil {
+		return nil, status.Error(codes.Unimplemented, "rooms are not configured")
+	}
+	if err := s.verifyOwnership(ctx, req.Handle); err != nil {
+		return nil, err
+	}
+	if _, err := s.roomManager.JoinRoom(ctx, req.RoomId, req.Handle); err != nil {
+		return nil, err
+	}
+	return &agentpb.JoinRoomResponse{Ok: true}, nil
+}
+
+func (s *AgentServer) LeaveRoom(ctx context.Context, req *agentpb.LeaveRoomRequest) (*agentpb.LeaveRoomResponse, error) {
+	if s.roomManager == nil {
+		return nil, status.Error(codes.Unimplemented, "rooms are not configured")
+	}
+	if err := s.verifyOwnership(ctx, req.Handle); err != nil {
+		return nil, err
+	}
+	if _, err := s.roomManager.LeaveRoom(ctx, req.RoomId, req.Handle); err != nil {
+		return nil, err
+	}
+	return &agentpb.LeaveRoomResponse{Ok: true}, nil
+}
+
+func (s *AgentServer) PostRoomMessage(ctx context.Context, req *agentpb.PostRoomMessageRequest) (*agentpb.PostRoomMessageResponse, error) {
+	if s.roomManager == nil {
+		return nil, status.Error(codes.Unimplemented, "rooms are not configured")
+	}
+	if err := s.verifyOwnership(ctx, req.FromHandle); err != nil {
+		return nil, err
+	}
+	event, err := s.roomManager.PostMessage(ctx, req.RoomId, req.FromHandle, req.Payload, req.ContentType, req.TraceId)
+	if err != nil {
+		return nil, err
+	}
+	return &agentpb.PostRoomMessageResponse{EventId: event.EventId, RoomSeq: event.RoomSeq}, nil
+}
+
+func (s *AgentServer) ListRooms(ctx context.Context, req *agentpb.ListRoomsRequest) (*agentpb.ListRoomsResponse, error) {
+	if s.roomManager == nil {
+		return nil, status.Error(codes.Unimplemented, "rooms are not configured")
+	}
+	if err := s.verifyOwnership(ctx, req.Handle); err != nil {
+		return nil, err
+	}
+	rooms, err := s.roomManager.ListRooms(ctx, req.Handle)
+	if err != nil {
+		return nil, err
+	}
+	return &agentpb.ListRoomsResponse{Rooms: rooms}, nil
+}
+
+func (s *AgentServer) ListRoomMembers(ctx context.Context, req *agentpb.ListRoomMembersRequest) (*agentpb.ListRoomMembersResponse, error) {
+	if s.roomManager == nil {
+		return nil, status.Error(codes.Unimplemented, "rooms are not configured")
+	}
+	if err := s.verifyOwnership(ctx, req.Handle); err != nil {
+		return nil, err
+	}
+	members, err := s.roomManager.ListMembers(ctx, req.RoomId, req.Handle)
+	if err != nil {
+		return nil, err
+	}
+	return &agentpb.ListRoomMembersResponse{Members: members}, nil
+}
+
+func (s *AgentServer) ReplayRoom(ctx context.Context, req *agentpb.ReplayRoomRequest) (*agentpb.ReplayRoomResponse, error) {
+	if s.roomManager == nil {
+		return nil, status.Error(codes.Unimplemented, "rooms are not configured")
+	}
+	if err := s.verifyOwnership(ctx, req.Handle); err != nil {
+		return nil, err
+	}
+	events, err := s.roomManager.Replay(ctx, req.RoomId, req.Handle, req.SinceSeq)
+	if err != nil {
+		return nil, err
+	}
+	return &agentpb.ReplayRoomResponse{Events: events}, nil
+}
+
+func (s *AgentServer) CloseRoom(ctx context.Context, req *agentpb.CloseRoomRequest) (*agentpb.CloseRoomResponse, error) {
+	if s.roomManager == nil {
+		return nil, status.Error(codes.Unimplemented, "rooms are not configured")
+	}
+	if err := s.verifyOwnership(ctx, req.Handle); err != nil {
+		return nil, err
+	}
+	if _, err := s.roomManager.CloseRoom(ctx, req.RoomId, req.Handle); err != nil {
+		return nil, err
+	}
+	return &agentpb.CloseRoomResponse{Ok: true}, nil
 }
 
 // ListSessions lists sessions involving a handle.

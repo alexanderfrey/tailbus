@@ -45,6 +45,10 @@ func (pm *PeerMap) Build() (*pb.PeerMapUpdate, error) {
 	if err != nil {
 		return nil, err
 	}
+	rooms, err := pm.store.ListRoomsForHandle("", "")
+	if err != nil {
+		return nil, err
+	}
 
 	var peers []*pb.PeerInfo
 	var relays []*pb.RelayInfo
@@ -79,6 +83,7 @@ func (pm *PeerMap) Build() (*pb.PeerMapUpdate, error) {
 	return &pb.PeerMapUpdate{
 		Peers:   peers,
 		Relays:  relays,
+		Rooms:   rooms,
 		Version: ver,
 	}, nil
 }
@@ -128,6 +133,10 @@ func (pm *PeerMap) BuildForTeam(teamID string) (*pb.PeerMapUpdate, error) {
 	if err != nil {
 		return nil, err
 	}
+	rooms, err := pm.store.ListRoomsForHandle("", teamID)
+	if err != nil {
+		return nil, err
+	}
 
 	var peers []*pb.PeerInfo
 	var relays []*pb.RelayInfo
@@ -161,6 +170,7 @@ func (pm *PeerMap) BuildForTeam(teamID string) (*pb.PeerMapUpdate, error) {
 	return &pb.PeerMapUpdate{
 		Peers:   peers,
 		Relays:  relays,
+		Rooms:   rooms,
 		Version: ver,
 	}, nil
 }

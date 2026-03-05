@@ -19,6 +19,8 @@ from tailbus._protocol import (
     Opened,
     Registered,
     Resolved,
+    RoomEvent,
+    RoomPosted,
     Sent,
     SessionInfo,
 )
@@ -555,6 +557,71 @@ class TestMessageDispatch(AsyncAgentTestCase):
                 self.assertEqual(len(received), 2)
                 self.assertEqual(received[0].payload, "first")
                 self.assertEqual(received[1].payload, "second")
+            finally:
+                await agent.close()
+
+        asyncio.run(run())
+
+    def test_room_event_dispatch(self) -> None:
+        async def run() -> None:
+            agent = AsyncAgent("test-agent")
+            await agent.start()
+            try:
+                received: list[RoomEvent] = []
+
+                @agent.on_message
+                async def handler(msg: Message | RoomEvent) -> None:
+                    if isinstance(msg, RoomEvent):
+                        received.append(msg)
+
+                self._queue({"type": "registered", "handle": "test-agent"})
+                await agent.register()
+
+                self._feed(
+                    {
+                        "type": "room_event",
+                        "room_id": "room-1",
+                        "room_seq": 1,
+                        "sender": "alice",
+                        "payload": "hello room",
+                        "content_type": "text/plain",
+                        "event_type": "message_posted",
+                        "event_id": "evt-1",
+                        "sent_at": 1700000000,
+                    }
+                )
+                await asyncio.sleep(0.01)
+
+                self.assertEqual(len(received), 1)
+                self.assertEqual(received[0].room_id, "room-1")
+            finally:
+                await agent.close()
+
+        asyncio.run(run())
+
+
+class TestRoomOps(AsyncAgentTestCase):
+    def test_room_command_round_trip(self) -> None:
+        async def run() -> None:
+            agent = AsyncAgent("test-agent")
+            await agent.start()
+            try:
+                self._queue({"type": "registered", "handle": "test-agent"})
+                await agent.register()
+
+                self._queue({"type": "room_created", "room_id": "room-1"})
+                room_id = await agent.create_room("design-review", ["other"])
+                self.assertEqual(room_id, "room-1")
+
+                self._queue({"type": "room_posted", "event_id": "evt-1", "room_seq": 2})
+                posted = await agent.post_room_message("room-1", "hello room")
+                self.assertIsInstance(posted, RoomPosted)
+                self.assertEqual(posted.event_id, "evt-1")
+
+                written = [json.loads(item) for item in self.fake_process.stdin.written]
+                self.assertEqual(written[1]["type"], "create_room")
+                self.assertEqual(written[2]["type"], "post_room")
+                self.assertEqual(written[2]["room_id"], "room-1")
             finally:
                 await agent.close()
 
