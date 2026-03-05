@@ -343,6 +343,24 @@ func (s *AgentServer) DeliverToLocal(env *messagepb.Envelope) bool {
 		return true
 	}
 
+	// Create a local session for incoming session_open from a remote node
+	// so the local agent can resolve/send on it.
+	if env.Type == messagepb.EnvelopeType_ENVELOPE_TYPE_SESSION_OPEN && env.SessionId != "" {
+		if _, exists := s.sessions.Get(env.SessionId); !exists {
+			sess := &session.Session{
+				ID:         env.SessionId,
+				FromHandle: env.FromHandle,
+				ToHandle:   env.ToHandle,
+				State:      session.StateOpen,
+				TraceID:    env.TraceId,
+				NextSeq:    1,
+				CreatedAt:  time.Now(),
+				UpdatedAt:  time.Now(),
+			}
+			s.sessions.Put(sess)
+		}
+	}
+
 	s.mu.RLock()
 	subs := s.subscribers[env.ToHandle]
 	hs := s.hstats[env.ToHandle]
