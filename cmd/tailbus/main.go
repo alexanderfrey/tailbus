@@ -6,6 +6,9 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"os/exec"
+	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 
@@ -426,6 +429,8 @@ func main() {
 			}
 			os.Exit(1)
 		}
+		// Unload launchd service on macOS so it doesn't auto-restart
+		unloadLaunchd(logger)
 		fmt.Println("tailbusd stopped")
 
 	case "dashboard":
@@ -466,5 +471,23 @@ func main() {
 	default:
 		fmt.Printf("Unknown command: %s\n", args[0])
 		os.Exit(1)
+	}
+}
+
+// unloadLaunchd unloads the tailbusd launchd service on macOS so it won't auto-restart.
+func unloadLaunchd(logger *slog.Logger) {
+	if runtime.GOOS != "darwin" {
+		return
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return
+	}
+	plist := filepath.Join(home, "Library", "LaunchAgents", "co.tailbus.daemon.plist")
+	if _, err := os.Stat(plist); err != nil {
+		return
+	}
+	if err := exec.Command("launchctl", "unload", plist).Run(); err != nil {
+		logger.Debug("launchctl unload failed", "error", err)
 	}
 }
