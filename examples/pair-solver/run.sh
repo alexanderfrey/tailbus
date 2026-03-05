@@ -2,10 +2,16 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
+if [ -d "${REPO_ROOT}/bin" ]; then
+    export PATH="${REPO_ROOT}/bin:${PATH}"
+fi
+
 COORD_ADDR="127.0.0.1:18443"
 COORD_HEALTH=":18081"
 COORD_DATA="/tmp/pairsolver-coord"
 LOG_DIR="/tmp/pairsolver-logs"
+GO_TMPDIR="${TMPDIR:-/tmp}"
 
 # name:listen_port:metrics_port:script
 NODES="
@@ -26,34 +32,102 @@ say()  { echo -e "  ${DIM}run.sh${RESET}  $*"; }
 good() { echo -e "  ${DIM}run.sh${RESET}  ${GREEN}✓${RESET} $*"; }
 fail() { echo -e "  ${DIM}run.sh${RESET}  ${RED}✗${RESET} $*"; exit 1; }
 
+kill_pid_list() {
+    local sig="$1"
+    shift || true
+    if [ "$#" -gt 0 ]; then
+        kill "-${sig}" "$@" 2>/dev/null || true
+    fi
+}
+
+wait_for_pids_to_exit() {
+    local deadline_secs="${1:-3}"
+    shift || true
+    local pid
+    local end=$((SECONDS + deadline_secs))
+    while [ "$#" -gt 0 ] && [ "$SECONDS" -lt "$end" ]; do
+        local remaining=()
+        for pid in "$@"; do
+            if kill -0 "$pid" 2>/dev/null; then
+                remaining+=("$pid")
+            fi
+        done
+        if [ "${#remaining[@]}" -eq 0 ]; then
+            return 0
+        fi
+        sleep 0.2
+        set -- "${remaining[@]}"
+    done
+    return 1
+}
+
+kill_listener_on_port() {
+    local port="$1"
+    local pids=()
+    while IFS= read -r pid; do
+        [ -n "$pid" ] && pids+=("$pid")
+    done < <(lsof -tiTCP:"${port}" -sTCP:LISTEN 2>/dev/null || true)
+    if [ "${#pids[@]}" -eq 0 ]; then
+        return 0
+    fi
+    kill_pid_list TERM "${pids[@]}"
+    if ! wait_for_pids_to_exit 3 "${pids[@]}"; then
+        kill_pid_list KILL "${pids[@]}"
+    fi
+}
+
+kill_processes_matching() {
+    local pattern="$1"
+    local pids=()
+    while IFS= read -r pid; do
+        [ -n "$pid" ] && pids+=("$pid")
+    done < <(pgrep -f "$pattern" 2>/dev/null || true)
+    if [ "${#pids[@]}" -eq 0 ]; then
+        return 0
+    fi
+    kill_pid_list TERM "${pids[@]}"
+    if ! wait_for_pids_to_exit 3 "${pids[@]}"; then
+        kill_pid_list KILL "${pids[@]}"
+    fi
+}
+
 stop_all() {
     say "stopping all pair-solver processes..."
 
     for entry in $NODES; do
-        local name="${entry%%:*}"
+        local name listen_port metrics_port script
+        IFS=: read -r name listen_port metrics_port script <<< "$entry"
         local sock="/tmp/pairsolver-${name}.sock"
 
-        local agent_pids
-        agent_pids=$(pgrep -f "TAILBUS_SOCKET=${sock}" 2>/dev/null || true)
-        if [ -n "$agent_pids" ]; then
-            kill $agent_pids 2>/dev/null || true
-        fi
+        kill_processes_matching "TAILBUS_SOCKET=${sock}"
+        kill_processes_matching "${SCRIPT_DIR}/${script}"
+        kill_listener_on_port "${listen_port}"
+        kill_listener_on_port "${metrics_port}"
 
-        local daemon_pids
-        daemon_pids=$(pgrep -f "tailbusd.*-node-id ${name}" 2>/dev/null || true)
-        if [ -n "$daemon_pids" ]; then
-            kill $daemon_pids 2>/dev/null || true
+        if [ -S "$sock" ]; then
+            local socket_pids=()
+            while IFS= read -r pid; do
+                [ -n "$pid" ] && socket_pids+=("$pid")
+            done < <(lsof -t "$sock" 2>/dev/null || true)
+            if [ "${#socket_pids[@]}" -gt 0 ]; then
+                kill_pid_list TERM "${socket_pids[@]}"
+                if ! wait_for_pids_to_exit 3 "${socket_pids[@]}"; then
+                    kill_pid_list KILL "${socket_pids[@]}"
+                fi
+            fi
         fi
     done
 
-    local coord_pids
-    coord_pids=$(pgrep -f "tailbus-coord.*${COORD_ADDR}" 2>/dev/null || true)
-    if [ -n "$coord_pids" ]; then
-        kill $coord_pids 2>/dev/null || true
-    fi
+    kill_processes_matching "tailbus-coord.*${COORD_ADDR}"
+    kill_listener_on_port 18443
+    kill_listener_on_port 18081
 
     sleep 1
     rm -f /tmp/pairsolver-*.sock
+    rm -f \
+        "${GO_TMPDIR}/tailbusd-orchestrator.coord-fp" \
+        "${GO_TMPDIR}/tailbusd-codex-solver.coord-fp" \
+        "${GO_TMPDIR}/tailbusd-lmstudio-solver.coord-fp"
     good "stopped"
 }
 
