@@ -93,6 +93,7 @@ Tailbus handles all four with one install.
 - **Handle-based addressing** — agents register names like `marketing` or `finance` and message each other without knowing machines, IPs, or endpoints
 - **@-mention auto-routing** — when a message contains `@handle`, the daemon auto-opens a session to that agent, wherever it lives; agents recruit each other mid-conversation
 - **Structured sessions** — open, exchange messages across multiple turns, and resolve when done; not fire-and-forget API calls
+- **Shared rooms** — daemon-managed multi-party conversations with ordered room events, replay, and membership, built above the 1:1 session transport
 - **P2P data plane** — messages flow directly between daemons via bidirectional gRPC streams, never through the coord server
 - **NAT traversal** — DERP-style relay with direct connection upgrade; agents behind home NATs, corporate firewalls, or private VPCs connect without port forwarding
 - **mTLS everywhere** — all connections use mutual TLS with Ed25519 identity verification; coord uses TOFU (trust-on-first-use) cert pinning
@@ -117,7 +118,7 @@ Every registered handle becomes a callable tool. If your agent declares commands
 
 - **Distributed tracing** — every session gets a `trace_id`; spans are recorded at each hop
 - **Prometheus metrics** — counters and histograms at `/metrics` for external monitoring
-- **Real-time TUI dashboard** — terminal UI with mesh topology, per-handle health counters (in/out/drops/queue), sessions, and live activity
+- **Real-time TUI dashboard** — terminal UI with mesh topology, per-handle health counters (in/out/drops/queue), rooms, sessions, live activity, and reconnect after daemon restarts
 - **Web chat UI** — browser-based interface embedded in the daemon for testing and debugging
 
 ### Reliability
@@ -229,6 +230,24 @@ docker compose up --build
 ```
 
 Open http://localhost:8080, click **researcher**, and ask it to investigate any topic. The pipeline runs: researcher → critic → writer, each as a separate agent on the mesh.
+
+### Pair Solver (Shared Rooms)
+
+Two solver agents collaborate in one shared Tailbus room while an orchestrator controls turn-taking. Codex proposes, LM Studio critiques and improves, and the orchestrator returns the final answer plus a replayable transcript.
+
+```bash
+cd examples/pair-solver
+bash run.sh
+bash run.sh fire "Write a Python function that finds the longest palindromic substring"
+```
+
+Open the dashboard in another terminal:
+
+```bash
+tailbus -socket /tmp/pairsolver-orchestrator.sock dashboard
+```
+
+See [`examples/pair-solver/README.md`](examples/pair-solver/README.md) for the full flow.
 
 ### 3-Machine Demo
 
@@ -633,7 +652,7 @@ tailbus trace <trace-id>
 tailbus dashboard
 ```
 
-Top panel shows mesh topology (ASCII graph or compact list); bottom panels show handles, sessions, and activity. Each handle displays live health counters:
+Top panel shows mesh topology (ASCII graph or compact list); bottom panels show handles, rooms, sessions, and activity. The dashboard automatically reconnects after the local daemon restarts. Each handle displays live health counters:
 
 ```
 HANDLES

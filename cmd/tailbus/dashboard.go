@@ -10,6 +10,9 @@ import (
 	agentpb "github.com/alexanderfrey/tailbus/api/agentpb"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 // Styles
@@ -111,7 +114,11 @@ type statusMsg *agentpb.GetNodeStatusResponse
 type activityMsg *agentpb.ActivityEvent
 type tickMsg time.Time
 type animTickMsg time.Time
-type errMsg struct{ error }
+type statusErrMsg struct{ error }
+type activityErrMsg struct{ error }
+type watchRetryMsg struct{}
+
+const watchRetryDelay = 1500 * time.Millisecond
 
 // edgeFlash represents a recent message flow between two handles.
 type edgeFlash struct {
@@ -144,8 +151,13 @@ type topoNode struct {
 }
 
 // Model
+type dashboardClient interface {
+	GetNodeStatus(ctx context.Context, in *agentpb.GetNodeStatusRequest, opts ...grpc.CallOption) (*agentpb.GetNodeStatusResponse, error)
+	WatchActivity(ctx context.Context, in *agentpb.WatchActivityRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[agentpb.ActivityEvent], error)
+}
+
 type dashboardModel struct {
-	client    agentpb.AgentAPIClient
+	client    dashboardClient
 	status    *agentpb.GetNodeStatusResponse
 	activity  []activityEntry
 	flashes   []edgeFlash
@@ -166,7 +178,7 @@ type activityEntry struct {
 
 const maxActivity = 50
 
-func newDashboardModel(client agentpb.AgentAPIClient) dashboardModel {
+func newDashboardModel(client dashboardClient) dashboardModel {
 	return dashboardModel{
 		client:    client,
 		busyTurns: make(map[string]busyTurn),
@@ -199,7 +211,7 @@ func (m dashboardModel) fetchStatus() tea.Msg {
 	defer cancel()
 	resp, err := m.client.GetNodeStatus(ctx, &agentpb.GetNodeStatusRequest{})
 	if err != nil {
-		return errMsg{err}
+		return statusErrMsg{err}
 	}
 	return statusMsg(resp)
 }
@@ -207,17 +219,39 @@ func (m dashboardModel) fetchStatus() tea.Msg {
 func (m dashboardModel) watchActivity() tea.Msg {
 	stream, err := m.client.WatchActivity(context.Background(), &agentpb.WatchActivityRequest{})
 	if err != nil {
-		return errMsg{err}
+		return activityErrMsg{err}
 	}
 	event, err := stream.Recv()
 	if err != nil {
-		return errMsg{err}
+		return activityErrMsg{err}
 	}
 	return activityMsg(event)
 }
 
 func (m dashboardModel) watchNext() tea.Msg {
 	return m.watchActivity()
+}
+
+func watchRetryCmd() tea.Cmd {
+	return tea.Tick(watchRetryDelay, func(time.Time) tea.Msg {
+		return watchRetryMsg{}
+	})
+}
+
+func shouldClearStatus(err error) bool {
+	if err == nil {
+		return false
+	}
+	switch status.Code(err) {
+	case codes.Unavailable, codes.Canceled, codes.DeadlineExceeded:
+		return true
+	}
+	text := strings.ToLower(err.Error())
+	return strings.Contains(text, "connection refused") ||
+		strings.Contains(text, "no such file") ||
+		strings.Contains(text, "transport is closing") ||
+		strings.Contains(text, "error reading from server: eof") ||
+		strings.Contains(text, "closed network connection")
 }
 
 func (m dashboardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -249,6 +283,13 @@ func (m dashboardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case statusMsg:
 		m.status = (*agentpb.GetNodeStatusResponse)(msg)
 		m.err = nil
+		return m, nil
+
+	case statusErrMsg:
+		m.err = msg.error
+		if shouldClearStatus(msg.error) {
+			m.status = nil
+		}
 		return m, nil
 
 	case activityMsg:
@@ -288,6 +329,13 @@ func (m dashboardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, m.watchNext
 
+	case activityErrMsg:
+		m.err = msg.error
+		return m, watchRetryCmd()
+
+	case watchRetryMsg:
+		return m, m.watchNext
+
 	case animTickMsg:
 		m.animFrame = (m.animFrame + 1) % 120
 		// Expire old flashes
@@ -304,9 +352,6 @@ func (m dashboardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tickMsg:
 		return m, tea.Batch(m.fetchStatus, tickCmd())
 
-	case errMsg:
-		m.err = msg.error
-		return m, nil
 	}
 
 	return m, nil
@@ -1210,7 +1255,7 @@ func (m dashboardModel) View() string {
 	} else {
 		topContent = m.renderDetailView(topW)
 	}
-	b.WriteString(sectionStyle.Width(totalWidth - 4).Render(topContent) + "\n")
+	b.WriteString(sectionStyle.Width(totalWidth-4).Render(topContent) + "\n")
 
 	// Bottom row: handles+sessions (left) | activity (right)
 	// Constrain bottom height so topology stays visible

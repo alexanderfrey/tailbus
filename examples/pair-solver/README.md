@@ -22,9 +22,17 @@ It demonstrates the new room primitive directly:
 ## Run
 
 ```bash
+cd /Users/alexanderfrey/Projects/tailbus
+make build
 cd examples/pair-solver
 bash run.sh
 bash run.sh fire "Write a Python function that finds the longest palindromic substring"
+```
+
+Dashboard:
+
+```bash
+tailbus -socket /tmp/pairsolver-orchestrator.sock dashboard
 ```
 
 Logs:
@@ -55,3 +63,10 @@ bash run.sh stop
 ## Current tradeoff
 
 Rooms provide shared state and replay. The orchestrator still decides whose turn it is. That is intentional: rooms solve conversation state, not coordination policy.
+
+## What to expect in the dashboard
+
+- the `ROOMS` section shows the active pair-solver room
+- room activity shows `PROBLEM`, `TURN`, `REPLY`, `TIMEOUT`, and `FINAL` events
+- the `WORK` section shows the currently active solver turn while Codex or LM Studio is still thinking
+- if you restart the local daemon, the dashboard reconnects automatically once it comes back

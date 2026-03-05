@@ -2,7 +2,7 @@
 
 ## Where we are today
 
-Working MVP with real security, NAT traversal, persistence, and MCP integration: coord server + node daemons + P2P gRPC transport + relay server + CLI + TUI dashboard + Prometheus metrics + distributed tracing + stdio bridge + MCP gateway + Docker Compose. **Phase 1 hardening complete:** mTLS on all connections (P2P, relay, and coord), per-connection handle ownership on the Unix socket, Unix socket token auth, coord admission control (pre-auth tokens + OAuth/JWT), per-session sequence numbers, and delivery ACKs with retry. **Phase 2 reliability:** message persistence via bbolt — sessions and pending messages survive daemon restarts. **Phase 3 NAT traversal:** DERP-style relay server enables message delivery across NAT boundaries. **Phase 4 SDKs:** Python SDK (async/sync, zero deps) wrapping the stdio bridge. **Phase 5 protocol bridges:** MCP gateway exposes handles as MCP tools — any MCP-compatible LLM can use tailbus agents. **Phase 8 teams:** Team-based isolation — teams as the core multi-tenancy unit; team-scoped peer maps, handle lookup, and registration; invite codes for onboarding; CLI team management commands; REST API + browser OAuth + web dashboard at `tailbus.co/dashboard`. **Phase 9 observability:** Web chat UI embedded in daemon binary for browser-based agent interaction. **Phase 10 deployment:** Docker Compose with full mesh + web UI + LLM agents; multi-agent LLM collaboration example (researcher/critic/writer pipeline); cross-network deployment templates for multi-machine meshes. **OAuth login:** Device Authorization Grant (RFC 8628) for Tailscale-style `install → login → connected` UX; Google OIDC; JWT tokens with auto-refresh; `tailbus login/logout/status` CLI commands. **Cloud deployment:** `tailbus-coord` on Fly.io at `coord.tailbus.co` with embedded relay on port 7443; any machine can join with `tailbus login && tailbusd` and gets NAT traversal for free.
+Working MVP with real security, NAT traversal, persistence, MCP integration, and first-class shared collaboration: coord server + node daemons + P2P gRPC transport + relay server + CLI + TUI dashboard + Prometheus metrics + distributed tracing + stdio bridge + MCP gateway + Docker Compose. **Phase 1 hardening complete:** mTLS on all connections (P2P, relay, and coord), per-connection handle ownership on the Unix socket, Unix socket token auth, coord admission control (pre-auth tokens + OAuth/JWT), per-session sequence numbers, and delivery ACKs with retry. **Phase 2 reliability:** message persistence via bbolt — sessions and pending messages survive daemon restarts. **Phase 3 NAT traversal:** DERP-style relay server enables message delivery across NAT boundaries. **Phase 4 SDKs:** Python SDK (async/sync, zero deps) wrapping the stdio bridge. **Phase 5 protocol bridges:** MCP gateway exposes handles as MCP tools — any MCP-compatible LLM can use tailbus agents. **Phase 6 collaboration:** daemon-managed shared rooms with ordered replay, room-aware dashboard activity, and a room-based pair-solver example. **Phase 8 teams:** Team-based isolation — teams as the core multi-tenancy unit; team-scoped peer maps, handle lookup, and registration; invite codes for onboarding; CLI team management commands; REST API + browser OAuth + web dashboard at `tailbus.co/dashboard`. **Phase 9 observability:** Web chat UI embedded in daemon binary for browser-based agent interaction. **Phase 10 deployment:** Docker Compose with full mesh + web UI + LLM agents; multi-agent LLM collaboration example (researcher/critic/writer pipeline); cross-network deployment templates for multi-machine meshes. **OAuth login:** Device Authorization Grant (RFC 8628) for Tailscale-style `install → login → connected` UX; Google OIDC; JWT tokens with auto-refresh; `tailbus login/logout/status` CLI commands. **Cloud deployment:** `tailbus-coord` on Fly.io at `coord.tailbus.co` with embedded relay on port 7443; any machine can join with `tailbus login && tailbusd` and gets NAT traversal for free.
 
 **What works:**
 - Agents register handles, open sessions, exchange messages, resolve conversations
@@ -14,12 +14,14 @@ Working MVP with real security, NAT traversal, persistence, and MCP integration:
 - Coord admission control — pre-auth token system gates node registration; open mode (no tokens) preserves zero-config default
 - Every envelope carries a monotonic sequence number; delivered messages generate ACKs; unacked messages retry (5s timeout, 3 retries)
 - Message persistence — bbolt-backed store on each daemon; sessions and pending messages survive restart; ACKed messages purged automatically
+- Shared rooms — daemon-managed multi-party conversations with ordered room events, replay, and home-daemon authority
 - MCP gateway — HTTP server on daemon exposing handles as MCP tools; `tools/list` returns handle manifests, `tools/call` opens session + sends + waits for response
 - Docker Compose — `docker compose up` gives you a full mesh with coord + 2 daemons + MCP gateway + web UI + 3 example Python agents
 - Web chat UI — embedded in daemon binary, served at MCP gateway address; agent sidebar, per-agent chat, responsive dark theme
 - `/healthz`, `/readyz`, and `/debug/pprof/*` endpoints on daemon metrics port, coord, and relay
 - Python SDK (`sdk/python/`) — `AsyncAgent` and `SyncAgent` with zero external dependencies
-- Service manifests, @-mention routing, tracing, Prometheus metrics, TUI dashboard
+- Pair-solver room demo — orchestrator + Codex + LM Studio collaborating through one shared room
+- Service manifests, @-mention routing, tracing, Prometheus metrics, TUI dashboard with room activity and reconnect after daemon restart
 
 **What's missing for real adoption:**
 - ~~No LICENSE file, CONTRIBUTING.md, or other open-source governance files~~ ✓ Added
@@ -224,27 +226,34 @@ Working MVP with real security, NAT traversal, persistence, and MCP integration:
 
 *Move beyond two-party request-response.*
 
-### P6.1 — Multi-party sessions
+### ~~P6.1 — Shared rooms~~ ✓ DONE
+- First-class daemon-managed `room` abstraction above 1:1 sessions
+- Coord tracks `room_id -> home_node_id` so any daemon can route room operations to the authoritative home daemon
+- Ordered append-only room event log with replay, membership, and close semantics
+- Pair-solver demo shows sequential multi-agent collaboration in one shared room
+- Dashboard surfaces room creation, room posts, room membership, and active turn state
+
+### P6.2 — Linked session trees
 - `parent_session_id` field in session for linked session trees
 - Agent A opens session with B, B delegates to C with back-link
 - Status propagation up the tree
 
-### P6.2 — Error envelope
+### P6.3 — Error envelope
 - `ENVELOPE_TYPE_ERROR` with structured `code` + `message` + `details`
 - Standard error codes: `NOT_FOUND`, `PERMISSION_DENIED`, `RATE_LIMITED`, `INTERNAL`
 - Agents can reject sessions cleanly
 
-### P6.3 — Task delegation pattern
+### P6.4 — Task delegation pattern
 - First-class A→B→C delegation with progress tracking
 - Parent session sees aggregated status from child sessions
 - Timeout propagation: if parent times out, children are cancelled
 
-### P6.4 — Fan-out & aggregation
+### P6.5 — Fan-out & aggregation
 - Orchestrator helper: open N parallel sub-sessions, collect results
 - Configurable: wait-all, wait-first, wait-quorum
 - Library in SDK, not a daemon feature
 
-### P6.5 — Agent capability negotiation
+### P6.6 — Agent capability negotiation
 - Extend ServiceManifest beyond static declarations
 - Typed command parameters (not just JSON schema strings — think gRPC service reflection)
 - Capability queries: "find me an agent that can do X" as a first-class coord operation
