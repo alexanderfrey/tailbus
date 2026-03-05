@@ -3,10 +3,12 @@ package main
 import (
 	"context"
 	"flag"
+	"fmt"
 	"log/slog"
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"syscall"
 
 	"github.com/alexanderfrey/tailbus/internal/config"
@@ -70,7 +72,11 @@ func main() {
 
 	d, err := daemon.New(&cfg, logger)
 	if err != nil {
-		logger.Error("failed to create daemon", "error", err)
+		if strings.Contains(err.Error(), "already running") {
+			fmt.Fprintln(os.Stderr, err)
+		} else {
+			logger.Error("failed to create daemon", "error", err)
+		}
 		os.Exit(1)
 	}
 

@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	agentpb "github.com/alexanderfrey/tailbus/api/agentpb"
@@ -21,6 +22,12 @@ import (
 	"github.com/alexanderfrey/tailbus/internal/session"
 	"github.com/alexanderfrey/tailbus/internal/transport"
 )
+
+// isLockTimeout checks whether err is a bbolt database lock timeout,
+// which means another tailbusd process is already running.
+func isLockTimeout(err error) bool {
+	return err != nil && strings.Contains(err.Error(), "timeout")
+}
 
 // Daemon is the main node daemon that ties together all components.
 type Daemon struct {
@@ -74,8 +81,12 @@ func New(cfg *config.DaemonConfig, logger *slog.Logger) (*Daemon, error) {
 	if err := os.MkdirAll(dataDir, 0700); err != nil {
 		return nil, fmt.Errorf("create data dir: %w", err)
 	}
-	msgStore, err := NewMessageStore(filepath.Join(dataDir, "messages.db"), logger)
+	dbPath := filepath.Join(dataDir, "messages.db")
+	msgStore, err := NewMessageStore(dbPath, logger)
 	if err != nil {
+		if isLockTimeout(err) {
+			return nil, fmt.Errorf("tailbusd is already running (database %s is locked)\nUse \"tailbus stop\" to stop it first", dbPath)
+		}
 		return nil, fmt.Errorf("open message store: %w", err)
 	}
 
