@@ -21,6 +21,8 @@ Sync usage::
         agent.resolve(opened.session, "done")
 """
 
+__version__ = "0.2.0"
+
 from ._agent import AsyncAgent
 from ._errors import (
     AlreadyRegisteredError,
@@ -35,6 +37,8 @@ from ._protocol import (
     Error,
     HandleEntry,
     HandleList,
+    HandleMatch,
+    HandleMatches,
     Introspected,
     Manifest,
     Message,
@@ -59,6 +63,7 @@ __all__ = [
     # Agents
     "AsyncAgent",
     "SyncAgent",
+    "__version__",
     # Protocol types
     "CommandSpec",
     "Manifest",
@@ -78,6 +83,8 @@ __all__ = [
     "Introspected",
     "HandleEntry",
     "HandleList",
+    "HandleMatch",
+    "HandleMatches",
     "SessionInfo",
     "SessionList",
     "Error",
