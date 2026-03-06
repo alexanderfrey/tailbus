@@ -291,11 +291,51 @@ Tailbus becomes a credible company-wide substrate when:
 - Configurable: wait-all, wait-first, wait-quorum
 - Library in SDK, not a daemon feature
 
-### P6.6 — Agent capability negotiation
-- Extend ServiceManifest beyond static declarations
-- Typed command parameters (not just JSON schema strings — think gRPC service reflection)
-- Capability queries: "find me an agent that can do X" as a first-class coord operation
-- Version-aware routing: route to latest version of a handle, or pin to specific
+### P6.6 — Capability discovery and routing
+- **Problem:** handle lookup is exact-address routing, not discovery. Once a mesh has dozens of agents, developers cannot be expected to memorize handles.
+- Keep direct handle routing as-is for exact addressing
+- Add first-class discovery on top of it, not instead of it
+
+#### P6.6a — Structured capability metadata
+- Extend `ServiceManifest` with searchable fields beyond `description`, `tags`, and `version`
+- Add stable `capabilities` identifiers such as `document.summarize`, `research.company`, `sql.query`
+- Add `domains` for business scope such as `finance`, `legal`, `sales`
+- Add `input_types` and `output_types` so callers can filter by payload contract
+- Keep `tags` as loose labels; do not make them the primary discovery contract
+
+#### P6.6b — Discovery query API
+- Add `FindHandles` / `FindAgents` as a first-class coord and daemon operation
+- Query fields should include:
+  - required capability IDs
+  - optional tags and domains
+  - optional command name
+  - version constraints
+  - team scope / visibility rules
+- Return ranked candidates with reasons, not just an unordered list
+
+#### P6.6c — Ranking and selection
+- Rank candidates by:
+  - exact capability match
+  - version match
+  - policy visibility
+  - recent health / availability
+  - locality / latency preference
+- Support deterministic selection rules so orchestrators can say:
+  - pick best match
+  - pick latest compatible version
+  - prefer local node
+  - prefer a specific team or domain
+
+#### P6.6d — Invocation model
+- Keep handle = transport address
+- Treat capabilities as the search index that resolves to one or more handles
+- Let orchestrators discover first, then open sessions or post room requests to the selected handle
+- Expose discovery in SDKs and CLI so users can do `tailbus find --capability research.company`
+
+#### P6.6e — Later extensions
+- Virtual handles / aliases such as `finance.research` that resolve dynamically to matching agents
+- Optional semantic search over descriptions and examples after the structured model is solid
+- Richer command reflection beyond raw JSON Schema once the discovery model is stable
 
 ---
 
@@ -560,7 +600,7 @@ All four items complete: governance files, CI pipeline, PyPI publish, CHANGELOG.
 | **P8.3 — Team-scoped policies** | ACLs are only manageable when scoped cleanly to teams. | Medium |
 | **P6.2 — Linked session trees** | Delegation exists ad hoc today; teams need explicit parent/child workflow semantics. | Large |
 | **P6.4 — Task delegation pattern** | Common orchestration workflows need a first-class pattern. | Medium |
-| **P6.6 — Agent capability negotiation** | Teams need to route by capability, tag, and version instead of memorizing handles. | Large |
+| **P6.6 — Capability discovery and routing** | Teams need to route by capability, tag, and version instead of memorizing handles. | Large |
 | **P9.1 — OpenTelemetry** | Production debugging needs standard observability export, not only custom tracing. | Medium |
 | **P5.1 — A2A gateway** | Interop with external agent ecosystems matters once the core team story is stable. | Medium |
 | **P3.2 — Direct connection probing** | Relay works but is slower; upgrade to direct when possible. | Medium |
