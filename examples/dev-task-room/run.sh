@@ -201,8 +201,8 @@ start_all() {
     say "starting coord on ${CYAN}${COORD_ADDR}${RESET}..."
     tailbus-coord \
         -listen "${COORD_ADDR}" \
-        -health "${COORD_HEALTH}" \
-        -data "${COORD_DATA}" \
+        -health-addr "${COORD_HEALTH}" \
+        -data-dir "${COORD_DATA}" \
         > "${LOG_DIR}/coord.log" 2>&1 &
     sleep 1
     curl -sf "http://127.0.0.1${COORD_HEALTH}/healthz" >/dev/null || fail "coord didn't start — check ${LOG_DIR}/coord.log"
@@ -218,10 +218,17 @@ start_all() {
             -metrics ":${metrics_port}" \
             -socket "${sock}" \
             -coord "${COORD_ADDR}" \
-            -node "${name}" \
+            -node-id "${name}" \
+            -advertise "127.0.0.1:${listen_port}" \
             > "${LOG_DIR}/daemon-${name}.log" 2>&1 &
-        sleep 1
-        grep -q "daemon started" "${LOG_DIR}/daemon-${name}.log" || fail "daemon ${name} didn't start — check ${LOG_DIR}/daemon-${name}.log"
+        local retries=0
+        while [ ! -S "$sock" ]; do
+            retries=$((retries + 1))
+            if [ $retries -gt 30 ]; then
+                fail "daemon ${name} didn't start — check ${LOG_DIR}/daemon-${name}.log"
+            fi
+            sleep 0.2
+        done
         good "daemon ${name} ready"
     done
 
@@ -230,7 +237,7 @@ start_all() {
         > "${LOG_DIR}/agent-orchestrator.log" 2>&1 &
     TAILBUS_SOCKET="/tmp/devtaskroom-control-node.sock" WORKSPACE_ROOT="${WORKSPACE_ROOT}" python3 "${SCRIPT_DIR}/workspace_agent.py" \
         > "${LOG_DIR}/agent-workspace-agent.log" 2>&1 &
-    TAILBUS_SOCKET="/tmp/devtaskroom-implement-node.sock" CODEX_MODEL="${CODEX_MODEL:-gpt-5-mini}" python3 "${SCRIPT_DIR}/implementer.py" \
+    TAILBUS_SOCKET="/tmp/devtaskroom-implement-node.sock" CODEX_MODEL="${CODEX_MODEL:-gpt-5.1-codex-mini}" python3 "${SCRIPT_DIR}/implementer.py" \
         > "${LOG_DIR}/agent-implementer.log" 2>&1 &
     TAILBUS_SOCKET="/tmp/devtaskroom-review-node.sock" LLM_BASE_URL="$(llm_base_url)" LLM_MODEL="${LLM_MODEL:-}" python3 "${SCRIPT_DIR}/critic.py" \
         > "${LOG_DIR}/agent-critic.log" 2>&1 &

@@ -137,6 +137,7 @@ type busyTurn struct {
 	round      uint32
 	since      time.Time
 	status     string
+	lastUpdate time.Time
 }
 
 // topoNode represents a node in the topology view.
@@ -294,10 +295,12 @@ func (m dashboardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case activityMsg:
 		event := (*agentpb.ActivityEvent)(msg)
-		entry := formatActivity(event)
-		m.activity = append(m.activity, entry)
-		if len(m.activity) > maxActivity {
-			m.activity = m.activity[len(m.activity)-maxActivity:]
+		if shouldDisplayActivity(event) {
+			entry := formatActivity(event)
+			m.activity = append(m.activity, entry)
+			if len(m.activity) > maxActivity {
+				m.activity = m.activity[len(m.activity)-maxActivity:]
+			}
 		}
 		// Record edge flashes for flow animation
 		now := time.Now()
@@ -427,6 +430,13 @@ func formatActivity(event *agentpb.ActivityEvent) activityEntry {
 		case "turn_request":
 			label := fmt.Sprintf("TURN %s r%d %s -> %s%s", roomID, e.RoomMessagePosted.Round, e.RoomMessagePosted.FromHandle, e.RoomMessagePosted.TargetHandle, traceTag)
 			return activityEntry{time: ts, label: label, style: actRoomStyle}
+		case "turn_progress":
+			target := e.RoomMessagePosted.TargetHandle
+			if target == "" {
+				target = e.RoomMessagePosted.FromHandle
+			}
+			label := fmt.Sprintf("PING %s r%d %s [%s]%s", roomID, e.RoomMessagePosted.Round, target, "working", traceTag)
+			return activityEntry{time: ts, label: label, style: actRoomStyle}
 		case "solver_reply":
 			status := e.RoomMessagePosted.Status
 			if status == "" {
@@ -476,6 +486,18 @@ func formatActivity(event *agentpb.ActivityEvent) activityEntry {
 	}
 }
 
+func shouldDisplayActivity(event *agentpb.ActivityEvent) bool {
+	if event == nil {
+		return false
+	}
+	switch e := event.Event.(type) {
+	case *agentpb.ActivityEvent_RoomMessagePosted:
+		return e.RoomMessagePosted == nil || e.RoomMessagePosted.ContentKind != "turn_progress"
+	default:
+		return true
+	}
+}
+
 func (m *dashboardModel) updateBusyTurns(event *agentpb.RoomMessagePostedEvent, now time.Time) {
 	if event == nil {
 		return
@@ -497,7 +519,30 @@ func (m *dashboardModel) updateBusyTurns(event *agentpb.RoomMessagePostedEvent, 
 			round:      event.Round,
 			since:      now,
 			status:     "working",
+			lastUpdate: now,
 		}
+	case "turn_progress":
+		target := event.TargetHandle
+		if target == "" {
+			target = event.FromHandle
+		}
+		if target == "" {
+			return
+		}
+		bt := m.busyTurns[turnID]
+		if bt.turnID == "" {
+			bt = busyTurn{
+				turnID:     turnID,
+				roomID:     event.RoomId,
+				fromHandle: event.FromHandle,
+				toHandle:   target,
+				round:      event.Round,
+				since:      now,
+			}
+		}
+		bt.status = "working"
+		bt.lastUpdate = now
+		m.busyTurns[turnID] = bt
 	case "solver_reply", "turn_timeout":
 		delete(m.busyTurns, turnID)
 	}
@@ -1012,7 +1057,8 @@ func renderNodeBox(n topoNode, isLocal bool, active bool, activeHandles map[stri
 	var b strings.Builder
 
 	// Top border
-	b.WriteString("  " + borderStyle.Render("+"+strings.Repeat("-", innerW+2)+"+") + "\n")
+	topBorder := renderAnimatedHorizontalBorder(innerW+2, animFrame, active)
+	b.WriteString("  " + topBorder + "\n")
 
 	// Node name line with icon
 	icon := "\u25cf" // ●
@@ -1050,7 +1096,13 @@ func renderNodeBox(n topoNode, isLocal bool, active bool, activeHandles map[stri
 	if padR < 0 {
 		padR = 0
 	}
-	b.WriteString("  " + borderStyle.Render("|") + " " + nameLine + strings.Repeat(" ", padR) + borderStyle.Render("|") + "\n")
+	leftBorder := borderStyle.Render("|")
+	rightBorder := borderStyle.Render("|")
+	if active {
+		leftBorder = animatedBorderSide(animFrame, 0)
+		rightBorder = animatedBorderSide(animFrame, 2)
+	}
+	b.WriteString("  " + leftBorder + " " + nameLine + strings.Repeat(" ", padR) + rightBorder + "\n")
 
 	// Handle lines (up to 3)
 	maxHandles := 3
@@ -1063,7 +1115,13 @@ func renderNodeBox(n topoNode, isLocal bool, active bool, activeHandles map[stri
 			if padR < 0 {
 				padR = 0
 			}
-			b.WriteString("  " + borderStyle.Render("|") + " " + helpStyle.Render(more) + strings.Repeat(" ", padR) + borderStyle.Render("|") + "\n")
+			leftBorder = borderStyle.Render("|")
+			rightBorder = borderStyle.Render("|")
+			if active {
+				leftBorder = animatedBorderSide(animFrame, i+1)
+				rightBorder = animatedBorderSide(animFrame, i+3)
+			}
+			b.WriteString("  " + leftBorder + " " + helpStyle.Render(more) + strings.Repeat(" ", padR) + rightBorder + "\n")
 			break
 		}
 		hName := h
@@ -1080,13 +1138,36 @@ func renderNodeBox(n topoNode, isLocal bool, active bool, activeHandles map[stri
 		} else {
 			renderedH = helpStyle.Render(hName)
 		}
-		b.WriteString("  " + borderStyle.Render("|") + " " + renderedH + strings.Repeat(" ", padR) + borderStyle.Render("|") + "\n")
+		leftBorder = borderStyle.Render("|")
+		rightBorder = borderStyle.Render("|")
+		if active {
+			leftBorder = animatedBorderSide(animFrame, i+1)
+			rightBorder = animatedBorderSide(animFrame, i+3)
+		}
+		b.WriteString("  " + leftBorder + " " + renderedH + strings.Repeat(" ", padR) + rightBorder + "\n")
 	}
 
 	// Bottom border
-	b.WriteString("  " + borderStyle.Render("+"+strings.Repeat("-", innerW+2)+"+"))
+	bottomBorder := renderAnimatedHorizontalBorder(innerW+2, animFrame+4, active)
+	b.WriteString("  " + bottomBorder)
 
 	return b.String()
+}
+
+func animatedBorderSide(frame, offset int) string {
+	if ((frame / 3) + offset) % 2 == 0 {
+		return flashNodeStyle.Render("|")
+	}
+	return flashNodeStyle.Reverse(true).Render("|")
+}
+
+func renderAnimatedHorizontalBorder(width, frame int, active bool) string {
+	border := []rune(strings.Repeat("-", width))
+	if active && width > 0 {
+		border[(frame/2)%width] = '='
+		return flashNodeStyle.Render("+" + string(border) + "+")
+	}
+	return lipgloss.NewStyle().Render("+" + string(border) + "+")
 }
 
 // renderEdge renders the connection line between local and a remote node.

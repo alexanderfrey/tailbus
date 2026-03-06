@@ -4,13 +4,16 @@ import (
 	"context"
 	"io"
 	"reflect"
+	"strings"
 	"testing"
+	"time"
 
 	agentpb "github.com/alexanderfrey/tailbus/api/agentpb"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
 type fakeDashboardClient struct {
@@ -155,5 +158,88 @@ func TestBuildTopoNodesSortsPeersAndRelaysStably(t *testing.T) {
 	}
 	if !reflect.DeepEqual(nodes[2].handles, []string{"logs-agent", "release-agent"}) {
 		t.Fatalf("expected peer handles to be sorted, got %v", nodes[2].handles)
+	}
+}
+
+func TestDashboardBusyTurnTracksProgress(t *testing.T) {
+	model := newDashboardModel(&fakeDashboardClient{})
+	now := time.Now()
+
+	next, _ := model.Update(activityMsg(&agentpb.ActivityEvent{
+		Event: &agentpb.ActivityEvent_RoomMessagePosted{
+			RoomMessagePosted: &agentpb.RoomMessagePostedEvent{
+				RoomId:       "room-1",
+				FromHandle:   "task-orchestrator",
+				TargetHandle: "implementer",
+				TurnId:       "turn-1",
+				ContentKind:  "turn_request",
+				Round:        1,
+			},
+		},
+	}))
+	updated := next.(dashboardModel)
+	bt, ok := updated.busyTurns["turn-1"]
+	if !ok {
+		t.Fatal("expected busy turn after turn_request")
+	}
+	createdAt := bt.since
+	activityCount := len(updated.activity)
+
+	next, _ = updated.Update(activityMsg(&agentpb.ActivityEvent{
+		Event: &agentpb.ActivityEvent_RoomMessagePosted{
+			RoomMessagePosted: &agentpb.RoomMessagePostedEvent{
+				RoomId:       "room-1",
+				FromHandle:   "implementer",
+				TargetHandle: "implementer",
+				TurnId:       "turn-1",
+				ContentKind:  "turn_progress",
+				Status:       "working",
+				Round:        1,
+			},
+		},
+		Timestamp: timestamppb.New(now),
+	}))
+	updated = next.(dashboardModel)
+	bt, ok = updated.busyTurns["turn-1"]
+	if !ok {
+		t.Fatal("expected busy turn to remain after progress")
+	}
+	if bt.toHandle != "implementer" {
+		t.Fatalf("toHandle = %q, want implementer", bt.toHandle)
+	}
+	if bt.since != createdAt {
+		t.Fatal("expected original busy-turn start time to be preserved")
+	}
+	if len(updated.activity) != activityCount {
+		t.Fatal("expected turn_progress to stay out of the activity feed")
+	}
+
+	next, _ = updated.Update(activityMsg(&agentpb.ActivityEvent{
+		Event: &agentpb.ActivityEvent_RoomMessagePosted{
+			RoomMessagePosted: &agentpb.RoomMessagePostedEvent{
+				RoomId:      "room-1",
+				FromHandle:  "implementer",
+				TurnId:      "turn-1",
+				ContentKind: "solver_reply",
+				Status:      "ok",
+				Round:       1,
+			},
+		},
+	}))
+	updated = next.(dashboardModel)
+	if _, ok := updated.busyTurns["turn-1"]; ok {
+		t.Fatal("expected busy turn to be cleared after reply")
+	}
+}
+
+func TestRenderNodeBoxActiveBorderAnimates(t *testing.T) {
+	node := topoNode{id: "implement-node", handles: []string{"implementer"}}
+	boxA := renderNodeBox(node, false, true, map[string]bool{"implementer": true}, 0)
+	boxB := renderNodeBox(node, false, true, map[string]bool{"implementer": true}, 6)
+	if boxA == boxB {
+		t.Fatal("expected active node border rendering to vary across animation frames")
+	}
+	if !strings.Contains(boxA, "implement-node") || !strings.Contains(boxB, "implement-node") {
+		t.Fatal("expected node name to remain present in animated render")
 	}
 }

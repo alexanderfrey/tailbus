@@ -17,11 +17,13 @@ from dev_task_common import (
     BOLD,
     GREEN,
     LLM_BASE_URL,
+    TURN_PROGRESS_INTERVAL,
     RESET,
     YELLOW,
     llm_call,
     parse_json,
     parse_json_object,
+    progress_pinger,
     replay_room_with_retry,
     room_task_from_events,
     say,
@@ -133,6 +135,18 @@ async def handle(msg: RoomEvent) -> None:
         return
     seen_turns.add(turn_id)
     say(agent.handle, f"reviewing via {BOLD}{LLM_BASE_URL}{RESET}")
+    progress_task = asyncio.create_task(
+        progress_pinger(
+            agent,
+            room_id=msg.room_id,
+            turn_id=turn_id,
+            round_no=int(payload.get("round", 0)),
+            target_handle=agent.handle,
+            target_capability="dev.review",
+            summary="Critic is still reviewing the change set.",
+            interval=TURN_PROGRESS_INTERVAL,
+        )
+    )
     try:
         reply = await review_turn(msg.room_id, payload)
     except Exception as exc:
@@ -146,6 +160,12 @@ async def handle(msg: RoomEvent) -> None:
             "error": str(exc),
             "elapsed_sec": 0.0,
         }
+    finally:
+        progress_task.cancel()
+        try:
+            await progress_task
+        except asyncio.CancelledError:
+            pass
     if reply["status"] == "ok":
         say(agent.handle, f"{GREEN}posted{RESET} review in {reply['elapsed_sec']:.1f}s")
     else:

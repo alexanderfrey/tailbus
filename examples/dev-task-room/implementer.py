@@ -18,10 +18,12 @@ from dev_task_common import (
     CODEX_MODEL,
     CODEX_TIMEOUT,
     GREEN,
+    TURN_PROGRESS_INTERVAL,
     RED,
     RESET,
     YELLOW,
     parse_json,
+    progress_pinger,
     replay_room_with_retry,
     room_task_from_events,
     run_codex_json,
@@ -154,7 +156,20 @@ async def handle(msg: RoomEvent) -> None:
     if not turn_id or turn_id in seen_turns:
         return
     seen_turns.add(turn_id)
-    say(agent.handle, f"implementing via {BOLD}{CODEX_MODEL}{RESET}")
+    model_label = CODEX_MODEL or "codex default model"
+    say(agent.handle, f"implementing via {BOLD}{model_label}{RESET}")
+    progress_task = asyncio.create_task(
+        progress_pinger(
+            agent,
+            room_id=msg.room_id,
+            turn_id=turn_id,
+            round_no=int(payload.get("round", 0)),
+            target_handle=agent.handle,
+            target_capability="dev.implement",
+            summary="Implementer is still preparing the change set.",
+            interval=TURN_PROGRESS_INTERVAL,
+        )
+    )
     try:
         reply = await implement_turn(msg.room_id, payload)
     except Exception as exc:
@@ -168,6 +183,12 @@ async def handle(msg: RoomEvent) -> None:
             "error": str(exc),
             "elapsed_sec": 0.0,
         }
+    finally:
+        progress_task.cancel()
+        try:
+            await progress_task
+        except asyncio.CancelledError:
+            pass
     if reply["status"] == "ok":
         say(agent.handle, f"{GREEN}posted{RESET} implementation in {reply['elapsed_sec']:.1f}s")
     else:

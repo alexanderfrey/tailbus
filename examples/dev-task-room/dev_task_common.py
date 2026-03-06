@@ -25,8 +25,9 @@ ROOM_REPLAY_DELAY = float(os.environ.get("DEV_TASK_ROOM_REPLAY_DELAY", "0.5"))
 LLM_BASE_URL = os.environ.get("LLM_BASE_URL", "http://localhost:1234/v1")
 LLM_MODEL = os.environ.get("LLM_MODEL", "")
 CODEX_TIMEOUT = int(os.environ.get("CODEX_TIMEOUT", "120"))
-CODEX_MODEL = os.environ.get("CODEX_MODEL", "gpt-5-mini")
+CODEX_MODEL = os.environ.get("CODEX_MODEL", "gpt-5.1-codex-mini")
 MAX_SNAPSHOT_CHARS = int(os.environ.get("DEV_TASK_ROOM_SNAPSHOT_CHARS", "24000"))
+TURN_PROGRESS_INTERVAL = float(os.environ.get("DEV_TASK_ROOM_PROGRESS_INTERVAL", "4"))
 WORKSPACE_ROOT = Path(os.environ.get("WORKSPACE_ROOT", Path(__file__).resolve().parent / "workspace"))
 WORKSPACE_TEMPLATE = Path(
     os.environ.get("WORKSPACE_TEMPLATE", Path(__file__).resolve().parent / "workspace-template")
@@ -191,15 +192,12 @@ def parse_json_object(text: str) -> dict[str, Any] | None:
 
 async def run_codex_json(prompt: str, output_file: str, timeout: int = CODEX_TIMEOUT) -> str:
     try:
+        cmd = ["codex", "exec", prompt]
+        if CODEX_MODEL:
+            cmd.extend(["-m", CODEX_MODEL])
+        cmd.extend(["-o", output_file, "--ephemeral"])
         proc = await asyncio.create_subprocess_exec(
-            "codex",
-            "exec",
-            prompt,
-            "-m",
-            CODEX_MODEL,
-            "-o",
-            output_file,
-            "--ephemeral",
+            *cmd,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
@@ -332,6 +330,40 @@ def format_match_line(match: dict[str, Any]) -> str:
         f"- `{match['handle']}` for `{match['capability']}`"
         f" (score {match['score']}; reasons: {reasons})"
     )
+
+
+async def progress_pinger(
+    agent: AsyncAgent,
+    *,
+    room_id: str,
+    turn_id: str,
+    round_no: int,
+    target_handle: str,
+    target_capability: str,
+    summary: str,
+    interval: float = TURN_PROGRESS_INTERVAL,
+) -> None:
+    elapsed = 0.0
+    while True:
+        await asyncio.sleep(interval)
+        elapsed += interval
+        payload = {
+            "kind": "turn_progress",
+            "turn_id": turn_id,
+            "round": round_no,
+            "author": agent.handle,
+            "target_handle": target_handle,
+            "target_capability": target_capability,
+            "status": "working",
+            "summary": summary,
+            "elapsed_sec": round(elapsed, 1),
+        }
+        await agent.post_room_message(
+            room_id,
+            json.dumps(payload),
+            content_type="application/json",
+            trace_id=turn_id,
+        )
 
 
 def build_output_markdown(

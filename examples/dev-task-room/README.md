@@ -71,10 +71,12 @@ Optional env vars:
 ```bash
 LLM_BASE_URL=http://localhost:1234/v1
 LLM_MODEL=<lm-studio-model>
-CODEX_MODEL=gpt-5-mini
+CODEX_MODEL=gpt-5.1-codex-mini
 TURN_TIMEOUT=120
 WORKSPACE_ROOT=/tmp/devtaskroom-workspace
 ```
+
+`CODEX_MODEL` defaults to `gpt-5.1-codex-mini`. Override it if your local `codex` account supports a different model set.
 
 ## What gets written locally
 

@@ -126,7 +126,7 @@ func TestRoomMessageActivityMeta(t *testing.T) {
 		ContentType: "application/json",
 		Payload: []byte(`{
 			"kind":"turn_request",
-			"target":"codex-solver",
+			"target_handle":"codex-solver",
 			"turn_id":"turn-123",
 			"status":"working",
 			"round":2

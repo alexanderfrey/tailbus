@@ -523,7 +523,10 @@ func roomMessageActivityMeta(event *messagepb.RoomEvent) (contentKind, targetHan
 	}
 
 	contentKind = stringField(payload, "kind")
-	targetHandle = stringField(payload, "target")
+	targetHandle = stringField(payload, "target_handle")
+	if targetHandle == "" {
+		targetHandle = stringField(payload, "target")
+	}
 	turnID = stringField(payload, "turn_id")
 	status = stringField(payload, "status")
 	if roundValue, ok := payload["round"]; ok {

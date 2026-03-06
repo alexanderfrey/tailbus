@@ -71,7 +71,7 @@ agent = AsyncAgent(
     socket=os.environ.get("TAILBUS_SOCKET", "/tmp/tailbusd.sock"),
 )
 
-pending_turns: dict[str, asyncio.Future[dict[str, Any]]] = {}
+pending_turns: dict[str, tuple[asyncio.Future[dict[str, Any]], str]] = {}
 
 
 def short(text: str, limit: int = 92) -> str:
@@ -97,10 +97,23 @@ async def handle_room_event(event: RoomEvent) -> None:
     turn_id = str(payload.get("turn_id", ""))
     if not turn_id:
         return
-    future = pending_turns.get(turn_id)
-    if future is None or future.done():
+    pending = pending_turns.get(turn_id)
+    if pending is None:
+        return
+    future, expected_kind = pending
+    if future.done():
+        return
+    if str(payload.get("kind", "")) != expected_kind:
         return
     future.set_result(payload)
+
+
+def expected_reply_kind(request_kind: str) -> str:
+    if request_kind == "workspace_prepare_request":
+        return "workspace_prepare_reply"
+    if request_kind == "apply_request":
+        return "apply_result"
+    return request_kind.replace("_request", "_reply")
 
 
 async def discover_handle(capability: str) -> dict[str, Any]:
@@ -158,7 +171,7 @@ async def request_turn(
     if extra:
         payload.update(extra)
     future: asyncio.Future[dict[str, Any]] = asyncio.get_running_loop().create_future()
-    pending_turns[turn_id] = future
+    pending_turns[turn_id] = (future, expected_reply_kind(kind))
     await post_room(room_id, payload)
     say(agent.handle, f"{CYAN}→{RESET} @{target_handle} [{target_capability}]")
     say(agent.handle, f"   {DIM}{short(instruction)}{RESET}")
@@ -185,7 +198,7 @@ async def request_turn(
         )
         say(agent.handle, f"{RED}timeout{RESET} waiting for @{target_handle}")
         return {
-            "kind": kind.replace("_request", "_reply"),
+            "kind": expected_reply_kind(kind),
             "turn_id": turn_id,
             "author": target_handle,
             "status": "timeout",
