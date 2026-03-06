@@ -14,10 +14,14 @@ type CommandSpec struct {
 
 // ServiceManifest describes an agent's capabilities.
 type ServiceManifest struct {
-	Description string
-	Commands    []CommandSpec
-	Tags        []string
-	Version     string
+	Description  string
+	Commands     []CommandSpec
+	Tags         []string
+	Version      string
+	Capabilities []string
+	Domains      []string
+	InputTypes   []string
+	OutputTypes  []string
 }
 
 // PeerInfo holds the network info for a node that serves a given handle.
@@ -44,15 +48,15 @@ type NodeInfo struct {
 
 // RoomInfo holds discovery metadata for a shared room.
 type RoomInfo struct {
-	RoomID      string
-	Title       string
-	CreatedBy   string
-	HomeNodeID  string
-	Members     []string
-	Status      string
-	NextSeq     uint64
-	CreatedAt   int64
-	UpdatedAt   int64
+	RoomID     string
+	Title      string
+	CreatedBy  string
+	HomeNodeID string
+	Members    []string
+	Status     string
+	NextSeq    uint64
+	CreatedAt  int64
+	UpdatedAt  int64
 }
 
 // Resolver resolves handle names to peer info using a cached peer map.

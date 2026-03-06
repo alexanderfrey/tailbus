@@ -849,6 +849,10 @@ type ServiceManifest struct {
 	Commands      []*CommandSpec         `protobuf:"bytes,2,rep,name=commands,proto3" json:"commands,omitempty"`
 	Tags          []string               `protobuf:"bytes,3,rep,name=tags,proto3" json:"tags,omitempty"`
 	Version       string                 `protobuf:"bytes,4,opt,name=version,proto3" json:"version,omitempty"`
+	Capabilities  []string               `protobuf:"bytes,5,rep,name=capabilities,proto3" json:"capabilities,omitempty"`
+	Domains       []string               `protobuf:"bytes,6,rep,name=domains,proto3" json:"domains,omitempty"`
+	InputTypes    []string               `protobuf:"bytes,7,rep,name=input_types,json=inputTypes,proto3" json:"input_types,omitempty"`
+	OutputTypes   []string               `protobuf:"bytes,8,rep,name=output_types,json=outputTypes,proto3" json:"output_types,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -909,6 +913,34 @@ func (x *ServiceManifest) GetVersion() string {
 		return x.Version
 	}
 	return ""
+}
+
+func (x *ServiceManifest) GetCapabilities() []string {
+	if x != nil {
+		return x.Capabilities
+	}
+	return nil
+}
+
+func (x *ServiceManifest) GetDomains() []string {
+	if x != nil {
+		return x.Domains
+	}
+	return nil
+}
+
+func (x *ServiceManifest) GetInputTypes() []string {
+	if x != nil {
+		return x.InputTypes
+	}
+	return nil
+}
+
+func (x *ServiceManifest) GetOutputTypes() []string {
+	if x != nil {
+		return x.OutputTypes
+	}
+	return nil
 }
 
 var File_tailbus_v1_messages_proto protoreflect.FileDescriptor
@@ -988,12 +1020,17 @@ const file_tailbus_v1_messages_proto_rawDesc = "" +
 	"\vCommandSpec\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12 \n" +
 	"\vdescription\x18\x02 \x01(\tR\vdescription\x12+\n" +
-	"\x11parameters_schema\x18\x03 \x01(\tR\x10parametersSchema\"\x96\x01\n" +
+	"\x11parameters_schema\x18\x03 \x01(\tR\x10parametersSchema\"\x98\x02\n" +
 	"\x0fServiceManifest\x12 \n" +
 	"\vdescription\x18\x01 \x01(\tR\vdescription\x123\n" +
 	"\bcommands\x18\x02 \x03(\v2\x17.tailbus.v1.CommandSpecR\bcommands\x12\x12\n" +
 	"\x04tags\x18\x03 \x03(\tR\x04tags\x12\x18\n" +
-	"\aversion\x18\x04 \x01(\tR\aversion*\xa2\x01\n" +
+	"\aversion\x18\x04 \x01(\tR\aversion\x12\"\n" +
+	"\fcapabilities\x18\x05 \x03(\tR\fcapabilities\x12\x18\n" +
+	"\adomains\x18\x06 \x03(\tR\adomains\x12\x1f\n" +
+	"\vinput_types\x18\a \x03(\tR\n" +
+	"inputTypes\x12!\n" +
+	"\foutput_types\x18\b \x03(\tR\voutputTypes*\xa2\x01\n" +
 	"\fEnvelopeType\x12\x1d\n" +
 	"\x19ENVELOPE_TYPE_UNSPECIFIED\x10\x00\x12\x19\n" +
 	"\x15ENVELOPE_TYPE_MESSAGE\x10\x01\x12\x1e\n" +

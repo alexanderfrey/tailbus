@@ -11,6 +11,7 @@ import (
 	"time"
 
 	pb "github.com/alexanderfrey/tailbus/api/coordpb"
+	messagepb "github.com/alexanderfrey/tailbus/api/messagepb"
 	"github.com/alexanderfrey/tailbus/internal/identity"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
@@ -127,6 +128,57 @@ func TestRegisterAndLookup(t *testing.T) {
 	}
 	if lr.Found {
 		t.Error("expected not found")
+	}
+}
+
+func TestRegisterAndLookupPreservesManifestCapabilities(t *testing.T) {
+	store, cleanup := testStore(t)
+	defer cleanup()
+
+	err := store.UpsertNode(&NodeRecord{
+		NodeID:        "node-1",
+		PublicKey:     []byte("pubkey1"),
+		AdvertiseAddr: "10.0.0.1:9443",
+		Handles:       []string{"research"},
+		HandleManifests: map[string]*messagepb.ServiceManifest{
+			"research": {
+				Description:  "Research agent",
+				Tags:         []string{"analysis"},
+				Version:      "2.1.0",
+				Capabilities: []string{"research.company", "document.summarize"},
+				Domains:      []string{"finance"},
+				InputTypes:   []string{"application/json"},
+				OutputTypes:  []string{"text/plain"},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	lr, err := store.LookupHandle("research")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if lr == nil {
+		t.Fatal("handle not found")
+	}
+
+	manifest := lr.HandleManifests["research"]
+	if manifest == nil {
+		t.Fatal("manifest not returned")
+	}
+	if got, want := manifest.Capabilities, []string{"research.company", "document.summarize"}; len(got) != len(want) || got[0] != want[0] || got[1] != want[1] {
+		t.Fatalf("capabilities = %v, want %v", got, want)
+	}
+	if got, want := manifest.Domains, []string{"finance"}; len(got) != len(want) || got[0] != want[0] {
+		t.Fatalf("domains = %v, want %v", got, want)
+	}
+	if got, want := manifest.InputTypes, []string{"application/json"}; len(got) != len(want) || got[0] != want[0] {
+		t.Fatalf("input_types = %v, want %v", got, want)
+	}
+	if got, want := manifest.OutputTypes, []string{"text/plain"}; len(got) != len(want) || got[0] != want[0] {
+		t.Fatalf("output_types = %v, want %v", got, want)
 	}
 }
 

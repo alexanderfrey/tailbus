@@ -28,7 +28,7 @@ type CoordClient struct {
 	isRelay       bool
 	logger        *slog.Logger
 	resolver      *handle.Resolver
-	onRelayUpdate func()                         // called after relay info is updated
+	onRelayUpdate func()                                    // called after relay info is updated
 	tokenRefresh  func(ctx context.Context) (string, error) // refreshes auth token
 }
 
@@ -295,9 +295,13 @@ func protoToHandleManifest(m *messagepb.ServiceManifest) handle.ServiceManifest 
 		return handle.ServiceManifest{}
 	}
 	result := handle.ServiceManifest{
-		Description: m.Description,
-		Tags:        m.Tags,
-		Version:     m.Version,
+		Description:  m.Description,
+		Tags:         m.Tags,
+		Version:      m.Version,
+		Capabilities: m.Capabilities,
+		Domains:      m.Domains,
+		InputTypes:   m.InputTypes,
+		OutputTypes:  m.OutputTypes,
 	}
 	for _, c := range m.Commands {
 		result.Commands = append(result.Commands, handle.CommandSpec{
@@ -312,9 +316,13 @@ func protoToHandleManifest(m *messagepb.ServiceManifest) handle.ServiceManifest 
 // handleManifestToProto converts a Go-native ServiceManifest to the protobuf type.
 func handleManifestToProto(m handle.ServiceManifest) *messagepb.ServiceManifest {
 	result := &messagepb.ServiceManifest{
-		Description: m.Description,
-		Tags:        m.Tags,
-		Version:     m.Version,
+		Description:  m.Description,
+		Tags:         m.Tags,
+		Version:      m.Version,
+		Capabilities: m.Capabilities,
+		Domains:      m.Domains,
+		InputTypes:   m.InputTypes,
+		OutputTypes:  m.OutputTypes,
 	}
 	for _, c := range m.Commands {
 		result.Commands = append(result.Commands, &messagepb.CommandSpec{

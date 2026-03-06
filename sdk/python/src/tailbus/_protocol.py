@@ -60,6 +60,10 @@ class Manifest:
     commands: tuple[CommandSpec, ...] = ()
     tags: tuple[str, ...] = ()
     version: str = ""
+    capabilities: tuple[str, ...] = ()
+    domains: tuple[str, ...] = ()
+    input_types: tuple[str, ...] = ()
+    output_types: tuple[str, ...] = ()
 
     def to_dict(self) -> dict[str, Any]:
         d: dict[str, Any] = {}
@@ -71,6 +75,14 @@ class Manifest:
             d["tags"] = list(self.tags)
         if self.version:
             d["version"] = self.version
+        if self.capabilities:
+            d["capabilities"] = list(self.capabilities)
+        if self.domains:
+            d["domains"] = list(self.domains)
+        if self.input_types:
+            d["input_types"] = list(self.input_types)
+        if self.output_types:
+            d["output_types"] = list(self.output_types)
         return d
 
     @classmethod
@@ -90,6 +102,10 @@ class Manifest:
             commands=commands,
             tags=tuple(data.get("tags", [])),
             version=data.get("version", ""),
+            capabilities=tuple(data.get("capabilities", [])),
+            domains=tuple(data.get("domains", [])),
+            input_types=tuple(data.get("input_types", [])),
+            output_types=tuple(data.get("output_types", [])),
         )
 
 

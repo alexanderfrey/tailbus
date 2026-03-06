@@ -148,6 +148,8 @@ class TestRegister(AsyncAgentTestCase):
                 description="Test agent",
                 tags=("test",),
                 version="1.0",
+                capabilities=("research.company",),
+                domains=("finance",),
             )
             agent = AsyncAgent("test-agent", manifest=manifest)
             await agent.start()
@@ -163,6 +165,8 @@ class TestRegister(AsyncAgentTestCase):
                 self.assertEqual(cmd["handle"], "test-agent")
                 self.assertIn("manifest", cmd)
                 self.assertEqual(cmd["manifest"]["description"], "Test agent")
+                self.assertEqual(cmd["manifest"]["capabilities"], ["research.company"])
+                self.assertEqual(cmd["manifest"]["domains"], ["finance"])
             finally:
                 await agent.close()
 

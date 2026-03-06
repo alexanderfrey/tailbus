@@ -41,12 +41,19 @@ class TestSerializeCommand(unittest.TestCase):
         cmd = {
             "type": "register",
             "handle": "test",
-            "manifest": {"description": "Test agent", "tags": ["a", "b"]},
+            "manifest": {
+                "description": "Test agent",
+                "tags": ["a", "b"],
+                "capabilities": ["research.company"],
+                "domains": ["finance"],
+            },
         }
         result = serialize_command(cmd)
         parsed = json.loads(result)
         self.assertEqual(parsed["manifest"]["description"], "Test agent")
         self.assertEqual(parsed["manifest"]["tags"], ["a", "b"])
+        self.assertEqual(parsed["manifest"]["capabilities"], ["research.company"])
+        self.assertEqual(parsed["manifest"]["domains"], ["finance"])
 
 
 class TestParseRegistered(unittest.TestCase):
@@ -224,6 +231,10 @@ class TestParseIntrospected(unittest.TestCase):
                     "description": "Sales agent",
                     "tags": ["sales"],
                     "version": "1.0",
+                    "capabilities": ["pricing.quote"],
+                    "domains": ["sales"],
+                    "input_types": ["application/json"],
+                    "output_types": ["application/json"],
                     "commands": [
                         {"name": "quote", "description": "Get a quote"}
                     ],
@@ -240,6 +251,10 @@ class TestParseIntrospected(unittest.TestCase):
         self.assertEqual(resp.manifest.description, "Sales agent")
         self.assertEqual(resp.manifest.tags, ("sales",))
         self.assertEqual(resp.manifest.version, "1.0")
+        self.assertEqual(resp.manifest.capabilities, ("pricing.quote",))
+        self.assertEqual(resp.manifest.domains, ("sales",))
+        self.assertEqual(resp.manifest.input_types, ("application/json",))
+        self.assertEqual(resp.manifest.output_types, ("application/json",))
         self.assertEqual(len(resp.manifest.commands), 1)
         self.assertEqual(resp.manifest.commands[0].name, "quote")
 
@@ -335,11 +350,19 @@ class TestManifestSerialization(unittest.TestCase):
             ),
             tags=("tag1", "tag2"),
             version="1.0",
+            capabilities=("research.company", "document.summarize"),
+            domains=("finance",),
+            input_types=("application/json",),
+            output_types=("text/plain",),
         )
         d = m.to_dict()
         self.assertEqual(d["description"], "Test")
         self.assertEqual(d["version"], "1.0")
         self.assertEqual(d["tags"], ["tag1", "tag2"])
+        self.assertEqual(d["capabilities"], ["research.company", "document.summarize"])
+        self.assertEqual(d["domains"], ["finance"])
+        self.assertEqual(d["input_types"], ["application/json"])
+        self.assertEqual(d["output_types"], ["text/plain"])
         self.assertEqual(len(d["commands"]), 2)
         self.assertEqual(d["commands"][0]["parameters_schema"], '{"type":"object"}')
         self.assertNotIn("parameters_schema", d["commands"][1])
@@ -359,6 +382,8 @@ class TestManifestSerialization(unittest.TestCase):
         self.assertEqual(m.description, "")
         self.assertEqual(m.commands, ())
         self.assertEqual(m.tags, ())
+        self.assertEqual(m.capabilities, ())
+        self.assertEqual(m.domains, ())
 
     def test_roundtrip(self) -> None:
         original = Manifest(
@@ -366,12 +391,20 @@ class TestManifestSerialization(unittest.TestCase):
             commands=(CommandSpec("cmd", "A command"),),
             tags=("t1",),
             version="2.0",
+            capabilities=("sql.query",),
+            domains=("analytics",),
+            input_types=("application/sql",),
+            output_types=("application/json",),
         )
         restored = Manifest.from_dict(original.to_dict())
         assert restored is not None
         self.assertEqual(original.description, restored.description)
         self.assertEqual(original.version, restored.version)
         self.assertEqual(original.tags, restored.tags)
+        self.assertEqual(original.capabilities, restored.capabilities)
+        self.assertEqual(original.domains, restored.domains)
+        self.assertEqual(original.input_types, restored.input_types)
+        self.assertEqual(original.output_types, restored.output_types)
         self.assertEqual(len(original.commands), len(restored.commands))
         self.assertEqual(original.commands[0].name, restored.commands[0].name)
 

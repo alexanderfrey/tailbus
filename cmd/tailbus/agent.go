@@ -22,10 +22,14 @@ type commandCmd struct {
 }
 
 type manifestCmd struct {
-	Description string       `json:"description,omitempty"`
-	Commands    []commandCmd `json:"commands,omitempty"`
-	Tags        []string     `json:"tags,omitempty"`
-	Version     string       `json:"version,omitempty"`
+	Description  string       `json:"description,omitempty"`
+	Commands     []commandCmd `json:"commands,omitempty"`
+	Tags         []string     `json:"tags,omitempty"`
+	Version      string       `json:"version,omitempty"`
+	Capabilities []string     `json:"capabilities,omitempty"`
+	Domains      []string     `json:"domains,omitempty"`
+	InputTypes   []string     `json:"input_types,omitempty"`
+	OutputTypes  []string     `json:"output_types,omitempty"`
 }
 
 type inboundCmd struct {
@@ -70,10 +74,14 @@ type resolvedResp struct {
 }
 
 type introspectManifestResp struct {
-	Description string       `json:"description,omitempty"`
-	Commands    []commandCmd `json:"commands,omitempty"`
-	Tags        []string     `json:"tags,omitempty"`
-	Version     string       `json:"version,omitempty"`
+	Description  string       `json:"description,omitempty"`
+	Commands     []commandCmd `json:"commands,omitempty"`
+	Tags         []string     `json:"tags,omitempty"`
+	Version      string       `json:"version,omitempty"`
+	Capabilities []string     `json:"capabilities,omitempty"`
+	Domains      []string     `json:"domains,omitempty"`
+	InputTypes   []string     `json:"input_types,omitempty"`
+	OutputTypes  []string     `json:"output_types,omitempty"`
 }
 
 type introspectedResp struct {
@@ -218,9 +226,13 @@ func protoManifestToResp(m *messagepb.ServiceManifest) *introspectManifestResp {
 		return nil
 	}
 	resp := &introspectManifestResp{
-		Description: m.Description,
-		Tags:        m.Tags,
-		Version:     m.Version,
+		Description:  m.Description,
+		Tags:         m.Tags,
+		Version:      m.Version,
+		Capabilities: m.Capabilities,
+		Domains:      m.Domains,
+		InputTypes:   m.InputTypes,
+		OutputTypes:  m.OutputTypes,
 	}
 	for _, c := range m.Commands {
 		resp.Commands = append(resp.Commands, commandCmd{
@@ -332,9 +344,13 @@ func runAgent(client agentpb.AgentAPIClient, logger *slog.Logger) error {
 				req := &agentpb.RegisterRequest{Handle: cmd.Handle}
 				if cmd.Manifest != nil {
 					m := &messagepb.ServiceManifest{
-						Description: cmd.Manifest.Description,
-						Tags:        cmd.Manifest.Tags,
-						Version:     cmd.Manifest.Version,
+						Description:  cmd.Manifest.Description,
+						Tags:         cmd.Manifest.Tags,
+						Version:      cmd.Manifest.Version,
+						Capabilities: cmd.Manifest.Capabilities,
+						Domains:      cmd.Manifest.Domains,
+						InputTypes:   cmd.Manifest.InputTypes,
+						OutputTypes:  cmd.Manifest.OutputTypes,
 					}
 					for _, c := range cmd.Manifest.Commands {
 						m.Commands = append(m.Commands, &messagepb.CommandSpec{
