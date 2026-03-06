@@ -12,6 +12,7 @@ COORD_HEALTH=":18681"
 COORD_DATA="/tmp/incidentroom-coord"
 LOG_DIR="/tmp/incidentroom-logs"
 GO_TMPDIR="${TMPDIR:-/tmp}"
+VARIANT="${INCIDENT_ROOM_VARIANT:-deterministic}"
 
 # name:listen_port:metrics_port
 NODES="
@@ -22,7 +23,19 @@ comms-node:19646:19294
 "
 
 # node:script
-AGENTS="
+if [ "${VARIANT}" = "llm" ]; then
+    AGENTS="
+support-node:support_triage.py
+support-node:orchestrator.py
+ops-node:logs_agent.py
+ops-node:metrics_agent.py
+ops-node:release_agent.py
+finance-node:billing_agent.py
+comms-node:lmstudio_analyst.py
+comms-node:codex_status_agent.py
+"
+else
+    AGENTS="
 support-node:support_triage.py
 support-node:orchestrator.py
 ops-node:logs_agent.py
@@ -31,6 +44,7 @@ ops-node:release_agent.py
 finance-node:billing_agent.py
 comms-node:status_agent.py
 "
+fi
 
 DIM="\033[2m"
 BOLD="\033[1m"
@@ -173,6 +187,7 @@ start_all() {
     echo ""
     echo -e "  ${BOLD}Incident Room — Flagship Demo${RESET}"
     echo -e "  ${DIM}────────────────────────────────────────${RESET}"
+    echo -e "  ${DIM}variant: ${VARIANT}${RESET}"
     echo ""
 
     say "starting coord on ${CYAN}${COORD_ADDR}${RESET}..."
@@ -235,7 +250,9 @@ start_all() {
 
     echo ""
     echo -e "  ${DIM}────────────────────────────────────────${RESET}"
-    echo -e "  ${GREEN}All running.${RESET} 1 coord + 4 daemons + 7 agents"
+    local agent_count
+    agent_count="$(printf '%s\n' "$AGENTS" | sed '/^$/d' | wc -l | tr -d ' ')"
+    echo -e "  ${GREEN}All running.${RESET} 1 coord + 4 daemons + ${agent_count} agents"
     echo ""
     echo -e "  ${BOLD}Dashboard:${RESET}"
     echo -e "    tailbus -socket /tmp/incidentroom-support-node.sock dashboard"
@@ -253,6 +270,11 @@ start_all() {
     echo ""
     echo -e "  ${BOLD}Stop everything:${RESET}"
     echo -e "    ./run.sh stop"
+    if [ "${VARIANT}" != "llm" ]; then
+        echo ""
+        echo -e "  ${BOLD}LLM-backed variant:${RESET}"
+        echo -e "    ./run-llm.sh"
+    fi
     echo ""
 }
 

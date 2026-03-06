@@ -6,7 +6,11 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import tempfile
 import time
+import urllib.error
+import urllib.request
+from pathlib import Path
 from typing import Any
 
 sys_path = os.path.join(os.path.dirname(__file__), "../../sdk/python/src")
@@ -17,6 +21,10 @@ from tailbus import AsyncAgent, CommandSpec, Manifest, RoomEvent
 
 ROOM_REPLAY_RETRIES = int(os.environ.get("INCIDENT_ROOM_REPLAY_RETRIES", "12"))
 ROOM_REPLAY_DELAY = float(os.environ.get("INCIDENT_ROOM_REPLAY_DELAY", "0.5"))
+LLM_BASE_URL = os.environ.get("LLM_BASE_URL", "http://localhost:1234/v1")
+LLM_MODEL = os.environ.get("LLM_MODEL", "")
+CODEX_TIMEOUT = int(os.environ.get("CODEX_TIMEOUT", "90"))
+CODEX_MODEL = os.environ.get("CODEX_MODEL", "gpt-5-mini")
 
 DIM = "\033[2m"
 BOLD = "\033[1m"
@@ -456,3 +464,129 @@ def render_markdown_transcript(events: list[RoomEvent]) -> str:
             lines.append(prefix + kind)
     return "\n".join(lines)
 
+
+def render_llm_transcript(events: list[RoomEvent], *, limit_chars: int = 12000) -> str:
+    parts: list[str] = []
+    for event in events:
+        if event.event_type != "message_posted":
+            continue
+        payload = parse_json(event.payload)
+        if not payload:
+            continue
+        kind = payload.get("kind", "unknown")
+        if kind == "problem_opened":
+            parts.append(
+                "[incident_opened]\n"
+                f"title={payload.get('title', '')}\n"
+                f"severity={payload.get('severity', '')}\n"
+                f"impact={payload.get('customer_impact', '')}"
+            )
+        elif kind == "turn_request":
+            parts.append(
+                "[turn_request]\n"
+                f"target_handle={payload.get('target_handle', '')}\n"
+                f"target_capability={payload.get('target_capability', '')}\n"
+                f"response_type={payload.get('response_type', '')}\n"
+                f"instruction={payload.get('instruction', '')}"
+            )
+        elif kind == "solver_reply":
+            parts.append(
+                "[solver_reply]\n"
+                f"author={payload.get('author', '')}\n"
+                f"capability={payload.get('capability', '')}\n"
+                f"status={payload.get('status', '')}\n"
+                f"summary={payload.get('summary', '')}\n"
+                f"content={payload.get('content', '')}"
+            )
+        elif kind == "hypothesis":
+            parts.append(f"[hypothesis]\nsummary={payload.get('summary', '')}")
+        elif kind == "final_summary":
+            parts.append(f"[final_summary]\ncustomer_update={payload.get('customer_update', '')}")
+        elif kind == "turn_timeout":
+            parts.append(
+                "[turn_timeout]\n"
+                f"target_handle={payload.get('target_handle', '')}\n"
+                f"target_capability={payload.get('target_capability', '')}"
+            )
+    text = "\n\n".join(parts)
+    if len(text) > limit_chars:
+        return text[-limit_chars:]
+    return text
+
+
+def llm_call(system: str, user: str, *, temperature: float = 0.2, max_tokens: int = 1200) -> str:
+    body: dict[str, Any] = {
+        "messages": [
+            {"role": "system", "content": system},
+            {"role": "user", "content": user},
+        ],
+        "temperature": temperature,
+        "max_tokens": max_tokens,
+    }
+    if LLM_MODEL:
+        body["model"] = LLM_MODEL
+    request = urllib.request.Request(
+        f"{LLM_BASE_URL}/chat/completions",
+        data=json.dumps(body).encode("utf-8"),
+        headers={"Content-Type": "application/json"},
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=180) as response:
+            result = json.loads(response.read())
+            content = result["choices"][0]["message"]["content"]
+            if "<think>" in content:
+                parts = content.split("</think>")
+                content = parts[-1].strip() if len(parts) > 1 else content
+            return content.strip()
+    except urllib.error.URLError as exc:
+        return f"[LLM error] Could not reach LM Studio at {LLM_BASE_URL}: {exc.reason}"
+    except Exception as exc:
+        return f"[LLM error] {exc}"
+
+
+async def run_codex_prompt(prompt: str, *, timeout: int | None = None, model: str | None = None, prefix: str = "incident_room_codex") -> str:
+    timeout = timeout or CODEX_TIMEOUT
+    model = model or CODEX_MODEL
+    output_file = str(Path(tempfile.gettempdir()) / f"{prefix}_{int(time.time() * 1000)}.txt")
+    args = [
+        "codex",
+        "exec",
+        prompt,
+        "-o",
+        output_file,
+        "--ephemeral",
+    ]
+    if model:
+        args.extend(["-m", model])
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            *args,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout)
+        if proc.returncode != 0:
+            err = stderr.decode().strip() if stderr else "unknown error"
+            if os.path.exists(output_file):
+                with open(output_file, "r", encoding="utf-8") as handle:
+                    content = handle.read().strip()
+                if content:
+                    return content
+            return f"[codex error] exit code {proc.returncode}: {err}"
+        if os.path.exists(output_file):
+            with open(output_file, "r", encoding="utf-8") as handle:
+                return handle.read().strip()
+        return stdout.decode().strip() or "[codex error] no output produced"
+    except asyncio.TimeoutError:
+        proc.kill()
+        return f"[codex error] timed out after {timeout}s"
+    except FileNotFoundError:
+        return "[codex error] 'codex' CLI not found"
+    except Exception as exc:
+        return f"[codex error] {exc}"
+    finally:
+        if os.path.exists(output_file):
+            try:
+                os.unlink(output_file)
+            except OSError:
+                pass

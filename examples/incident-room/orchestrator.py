@@ -137,6 +137,19 @@ async def discover_handle(capability: str) -> dict[str, Any]:
     }
 
 
+async def discover_optional_handle(capability: str) -> dict[str, Any] | None:
+    matches = await agent.find_handles(capabilities=[capability], limit=1)
+    if not matches:
+        return None
+    match = matches[0]
+    return {
+        "capability": capability,
+        "handle": match.handle,
+        "score": match.score,
+        "reasons": list(match.match_reasons),
+    }
+
+
 async def request_turn(
     *,
     room_id: str,
@@ -284,11 +297,16 @@ async def handle(msg: Message | RoomEvent) -> None:
 
     say(agent.handle, f"{BOLD}{incident_id}{RESET} {incident['title']}")
     discovered: list[dict[str, Any]] = []
+    analyst: dict[str, Any] | None = None
     try:
         for item in SPECIALISTS:
             result = await discover_handle(item["capability"])
             discovered.append(result)
             say(agent.handle, f"discovered @{result['handle']} for {result['capability']}")
+        analyst = await discover_optional_handle("incident.analyze")
+        if analyst is not None:
+            discovered.append(analyst)
+            say(agent.handle, f"discovered @{analyst['handle']} for incident.analyze")
         status_handle = await discover_handle("statuspage.compose")
         discovered.append(status_handle)
         say(agent.handle, f"discovered @{status_handle['handle']} for statuspage.compose")
@@ -324,6 +342,21 @@ async def handle(msg: Message | RoomEvent) -> None:
         round_no += 1
 
     hypothesis = build_hypothesis(incident, replies)
+    if analyst is not None:
+        analyst_reply = await request_turn(
+            room_id=room_id,
+            incident_id=incident_id,
+            round_no=round_no,
+            target_handle=analyst["handle"],
+            target_capability=analyst["capability"],
+            instruction="Synthesize the specialist findings into a concise root-cause hypothesis with confidence and next action.",
+            response_type="incident-analysis",
+        )
+        replies.append(analyst_reply)
+        round_no += 1
+        if analyst_reply.get("status") == "ok":
+            hypothesis = analyst_reply.get("summary") or analyst_reply.get("content") or hypothesis
+
     await post_room(
         room_id,
         {
