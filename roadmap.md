@@ -27,11 +27,49 @@ Working MVP with real security, NAT traversal, persistence, MCP integration, and
 - ~~No LICENSE file, CONTRIBUTING.md, or other open-source governance files~~ ✓ Added
 - ~~No CI on PRs — no automated linting, testing, or coverage reporting~~ ✓ Added
 - ~~Python SDK not published to PyPI~~ ✓ PyPI publish in release pipeline
-- No ACLs — unrestricted any-to-any messaging; need handle-level and tag-based policies
+- No ACLs or namespace ownership — unrestricted any-to-any messaging is not acceptable for shared company meshes
+- Reliability story is still incomplete for larger deployments — no coord HA, no room failover, no dead-letter workflow, limited backpressure semantics
+- Capability discovery is too weak — developers still need to know exact handles instead of asking for an agent by capability/version/tag
 - Python SDK only; still no TypeScript/native Go SDKs
+- Operational UX is still thin — dashboard is useful live, but audit history, search, DLQ visibility, and admin operations are not strong enough yet
+- Enterprise identity is incomplete — Google OAuth works, but service accounts and broader SSO/provider support are still missing
 - No federation — `name@domain` is parsed but routing is single-coord only
 - CLI missing `--version`, `--json` output, and shell completions
 - ~~No OIDC/SSO identity — nodes authenticate with keypairs, not corporate IdPs~~ ✓ OAuth login with Google OIDC; JWT tokens; device authorization flow
+
+---
+
+## Adoption Milestones
+
+### Developer adoption
+
+Tailbus becomes a useful daily tool for individual developers when:
+
+- setup is boring: install, login, start daemon, run agents, no manual recovery steps
+- SDK coverage reaches the common languages for agent work: Python, TypeScript, and Go
+- error behavior is explicit: structured errors, cancellation, timeouts, and clear delivery semantics
+- docs go beyond the README: architecture, troubleshooting, examples, and protocol reference
+- local operations are easy: `doctor`, version reporting, shell completions, Docker images, and good example coverage
+
+### Team adoption
+
+Tailbus becomes useful for a department or small internal platform team when:
+
+- rooms, sessions, and delegation patterns are stable enough for real workflows
+- capability discovery exists, so teams can route by role/version/tag instead of memorizing handles
+- dashboards and logs answer operational questions quickly: who is active, what failed, what retried, what timed out
+- policy exists at the team boundary: namespace ownership, ACLs, and auditability
+- deployment paths are straightforward for laptops, servers, and basic cloud environments
+
+### Enterprise adoption
+
+Tailbus becomes a credible company-wide substrate when:
+
+- policy and governance are strong: ACLs, team-scoped policies, reserved namespaces, audit trails
+- reliability is explicit: coord failure model, room/home-daemon failure model, replay guarantees, DLQ/retry operations
+- identity supports real organizations: additional SSO providers, service accounts, machine/user separation
+- operational tooling is complete: search, history, admin console actions, alerting-friendly metrics, durable audit views
+- multi-domain and eventually federated routing are designed from a stable single-domain base
 
 ---
 
@@ -500,37 +538,46 @@ Working MVP with real security, NAT traversal, persistence, MCP integration, and
 
 All four items complete: governance files, CI pipeline, PyPI publish, CHANGELOG.
 
-### Now — Developer Experience
+### Now — Developer Adoption Baseline
 
 | Item | Why | Effort |
 |------|-----|--------|
 | **P11.4 — CLI polish** | Missing --version, --json, completions, doctor. Table stakes for CLI tools. | Medium |
 | **P11.5 — Install experience** | No checksums, no uninstall, no Homebrew. | Small |
 | **P4.2 — TypeScript SDK** | Second most common agent language. Doubles addressable audience. | Medium |
+| **P4.3 — Go SDK** | Critical for infrastructure and platform teams embedding Tailbus directly. | Medium |
+| **P11.6 — Documentation site** | README is strong, but deeper docs are now the bottleneck. | Medium |
 | **P11.8 — Docker image publishing** | No registry images for production use. | Small |
+| **P6.3 — Error envelope** | Developers need explicit failure semantics, not ad hoc strings. | Small |
 | **P2.3 — Backpressure** | Silent message drops are a time bomb. Need explicit signals. | Medium |
 
-### Next — Platform Features & Interoperability
+### Next — Team Adoption Baseline
 
 | Item | Why | Effort |
 |------|-----|--------|
-| **P5.1 — A2A gateway** | Interop with A2A standard (Linux Foundation, 100+ enterprises). Strategic. | Medium |
-| **P6.2 — Error envelope** | Without structured errors, every failure is silent. | Small |
-| **P9.1 — OpenTelemetry** | Custom tracing works at small scale; OTel needed for production debugging. | Medium |
-| **P11.6 — Documentation site** | Deeper docs for architecture, troubleshooting, security model, protocol spec. | Medium |
+| **P7.1 — Handle-level ACLs** | Once multiple groups share the mesh, unrestricted messaging becomes a blocker. | Medium |
+| **P7.2 — Tag-based policies** | Teams need rules based on capability classes, not one-off handle names. | Medium |
+| **P8.3 — Team-scoped policies** | ACLs are only manageable when scoped cleanly to teams. | Medium |
+| **P6.2 — Linked session trees** | Delegation exists ad hoc today; teams need explicit parent/child workflow semantics. | Large |
+| **P6.4 — Task delegation pattern** | Common orchestration workflows need a first-class pattern. | Medium |
+| **P6.6 — Agent capability negotiation** | Teams need to route by capability, tag, and version instead of memorizing handles. | Large |
+| **P9.1 — OpenTelemetry** | Production debugging needs standard observability export, not only custom tracing. | Medium |
+| **P5.1 — A2A gateway** | Interop with external agent ecosystems matters once the core team story is stable. | Medium |
 | **P3.2 — Direct connection probing** | Relay works but is slower; upgrade to direct when possible. | Medium |
-| **P7.1 — Handle-level ACLs** | When >1 team uses the mesh, unrestricted messaging is a non-starter. | Medium |
 
-### Later — Teams & Enterprise
+### Later — Enterprise Rollout
 
 | Item | Why | Effort |
 |------|-----|--------|
 | ~~P8.1 — Teams & user management~~ | ✓ Done | — |
 | ~~P8.2 — Team invitations~~ | ✓ Done | — |
-| **P7.1-P7.2 — ACLs** | Required for multi-team deployments. | Large |
+| **P7.1-P7.2 — ACLs** | Required for multi-team deployments and compliance review. | Large |
 | **P8.3 — Team-scoped policies** | ACLs need team boundaries to be manageable. | Medium |
-| **P6.1-P6.3 — Rich semantics** | Multi-party sessions, delegation, error envelopes. | Large |
+| **P1.7 — Handle namespace policies** | Companies need ownership, reservation, and revocation for critical handles. | Medium |
+| **P2.5 — Dead letter queue** | Operations teams need somewhere failed messages go besides logs. | Medium |
 | ~~P8.6 — Admin API & console~~ | ✓ Done | — |
+| **Dashboard + admin UX expansion** | Search, audit history, room/session drill-down, replay and retry actions are still missing. | Large |
+| **Enterprise identity expansion** | Google OAuth is not enough; service accounts and broader SSO are required. | Large |
 | **P8.4 — Domain isolation** | Required for multi-tenant SaaS. | Large |
 | **P8.5 — Federation** | Massive scope; get single-domain right first. | Very large |
 | **P11.9 — Community channels** | Discord/Discussions, blog, showcase. Growth lever after core is solid. | Small |
