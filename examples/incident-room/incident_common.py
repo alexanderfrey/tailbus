@@ -439,6 +439,21 @@ def render_markdown_transcript(events: list[RoomEvent]) -> str:
         kind = payload.get("kind", "unknown")
         if kind == "problem_opened":
             lines.append(prefix + f"incident opened `{payload.get('title', '')}`")
+        elif kind == "investigation_started":
+            members = payload.get("members", [])
+            if isinstance(members, list) and members:
+                lines.append(prefix + f"investigation started with {', '.join(f'`{item}`' for item in members)}")
+            else:
+                lines.append(prefix + "investigation started")
+        elif kind == "specialist_discovered":
+            lines.append(
+                prefix
+                + f"discovered `{payload.get('target_handle', '?')}`"
+                + f" for `{payload.get('target_capability', '?')}`"
+            )
+            reasons = payload.get("match_reasons", [])
+            if isinstance(reasons, list) and reasons:
+                lines.append(f"  reasons: {', '.join(str(item) for item in reasons)}")
         elif kind == "turn_request":
             lines.append(
                 prefix
@@ -480,6 +495,18 @@ def render_llm_transcript(events: list[RoomEvent], *, limit_chars: int = 12000) 
                 f"title={payload.get('title', '')}\n"
                 f"severity={payload.get('severity', '')}\n"
                 f"impact={payload.get('customer_impact', '')}"
+            )
+        elif kind == "investigation_started":
+            parts.append(
+                "[investigation_started]\n"
+                f"members={','.join(str(item) for item in payload.get('members', []))}"
+            )
+        elif kind == "specialist_discovered":
+            parts.append(
+                "[specialist_discovered]\n"
+                f"target_handle={payload.get('target_handle', '')}\n"
+                f"target_capability={payload.get('target_capability', '')}\n"
+                f"reasons={','.join(str(item) for item in payload.get('match_reasons', []))}"
             )
         elif kind == "turn_request":
             parts.append(

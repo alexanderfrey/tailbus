@@ -45,6 +45,42 @@ Each node has its own daemon. Tailbus routes discovery, room traffic, and dashbo
 
 ## Run
 
+### Fastest path
+
+Deterministic:
+
+```bash
+cd /Users/alexanderfrey/Projects/tailbus
+make build
+cd examples/incident-room
+./run.sh doctor
+./run.sh
+./run.sh dashboard
+```
+
+In another terminal:
+
+```bash
+./run.sh scenarios
+./run.sh fire checkout
+```
+
+LLM-backed:
+
+```bash
+cd /Users/alexanderfrey/Projects/tailbus
+make build
+cd examples/incident-room
+./run-llm.sh doctor
+./run-llm.sh
+./run.sh dashboard
+```
+
+If LM Studio or Codex is unavailable, the launcher degrades gracefully:
+
+- no LM Studio -> skip `lmstudio-analyst`
+- no Codex -> use deterministic `status-agent`
+
 ### Default deterministic mode
 
 This mode has no external LLM dependency. It is the stable out-of-the-box demo.
@@ -53,20 +89,22 @@ This mode has no external LLM dependency. It is the stable out-of-the-box demo.
 cd /Users/alexanderfrey/Projects/tailbus
 make build
 cd examples/incident-room
+./run.sh doctor
 ./run.sh
 ```
 
 Open the dashboard:
 
 ```bash
-tailbus -socket /tmp/incidentroom-support-node.sock dashboard
+./run.sh dashboard
 ```
 
 Open an incident:
 
 ```bash
-./run.sh fire "EU customers cannot complete checkout"
-./run.sh fire "Subscriptions are paid but not activating"
+./run.sh scenarios
+./run.sh fire checkout
+./run.sh fire billing
 ```
 
 Watch logs:
@@ -100,6 +138,7 @@ Run it:
 cd /Users/alexanderfrey/Projects/tailbus
 make build
 cd examples/incident-room
+./run-llm.sh doctor
 ./run-llm.sh
 ```
 
@@ -115,6 +154,12 @@ CODEX_TIMEOUT=90
 ## Capability discovery
 
 This example intentionally uses discovery, not fixed handles.
+
+You can see discovery in three places now:
+
+- support-triage discovers `incident-orchestrator`
+- the orchestrator posts `specialist_discovered` events into the room
+- the dashboard activity stream shows those discovery events before work is assigned
 
 Inspect the mesh:
 
@@ -143,6 +188,11 @@ Each transcript includes:
 - internal incident summary
 - customer-facing status update
 - room event transcript
+
+The transcript now also includes:
+
+- when the investigation officially started
+- which specialists were selected and why
 
 ## Why this demo matters
 

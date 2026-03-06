@@ -109,6 +109,22 @@ async def post_room(room_id: str, payload: dict[str, Any]) -> None:
     )
 
 
+async def post_discovery(room_id: str, incident_id: str, match: dict[str, Any]) -> None:
+    await post_room(
+        room_id,
+        {
+            "kind": "specialist_discovered",
+            "incident_id": incident_id,
+            "author": agent.handle,
+            "target_handle": match["handle"],
+            "target_capability": match["capability"],
+            "score": match["score"],
+            "match_reasons": list(match["reasons"]),
+            "recorded_at": int(time.time()),
+        },
+    )
+
+
 async def handle_room_event(event: RoomEvent) -> None:
     if event.event_type != "message_posted" or event.content_type != "application/json":
         return
@@ -323,6 +339,18 @@ async def handle(msg: Message | RoomEvent) -> None:
     room_id = await agent.create_room(room_title, room_members)
     await post_room(room_id, incident)
     say(agent.handle, f"room {room_id} created with {len(room_members)} specialists")
+    await post_room(
+        room_id,
+        {
+            "kind": "investigation_started",
+            "incident_id": incident_id,
+            "author": agent.handle,
+            "members": room_members,
+            "recorded_at": int(time.time()),
+        },
+    )
+    for item in discovered:
+        await post_discovery(room_id, incident_id, item)
 
     replies: list[dict[str, Any]] = []
     round_no = 1

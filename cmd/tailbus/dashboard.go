@@ -414,6 +414,16 @@ func formatActivity(event *agentpb.ActivityEvent) activityEntry {
 			traceTag = fmt.Sprintf(" t:%s", shortID(e.RoomMessagePosted.TraceId))
 		}
 		switch e.RoomMessagePosted.ContentKind {
+		case "investigation_started":
+			label := fmt.Sprintf("START %s by %s%s", roomID, e.RoomMessagePosted.FromHandle, traceTag)
+			return activityEntry{time: ts, label: label, style: actRoomStyle}
+		case "specialist_discovered":
+			target := e.RoomMessagePosted.TargetHandle
+			if target == "" {
+				target = "?"
+			}
+			label := fmt.Sprintf("DISCOVER %s -> %s%s", roomID, target, traceTag)
+			return activityEntry{time: ts, label: label, style: actRoomStyle}
 		case "turn_request":
 			label := fmt.Sprintf("TURN %s r%d %s -> %s%s", roomID, e.RoomMessagePosted.Round, e.RoomMessagePosted.FromHandle, e.RoomMessagePosted.TargetHandle, traceTag)
 			return activityEntry{time: ts, label: label, style: actRoomStyle}
