@@ -261,7 +261,7 @@ func main() {
 		// Check daemon connection
 		dialOpts := []grpc.DialOption{grpc.WithTransportCredentials(insecure.NewCredentials())}
 		if tokenData, err := os.ReadFile(*socketPath + ".token"); err == nil {
-			dialOpts = append(dialOpts, grpc.WithPerRPCCredentials(tokenCreds{token: string(tokenData)}))
+			dialOpts = append(dialOpts, grpc.WithPerRPCCredentials(tokenCreds{token: strings.TrimSpace(string(tokenData))}))
 		}
 		conn, cerr := grpc.NewClient("unix://"+*socketPath, dialOpts...)
 		if cerr != nil {

@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import asyncio
+import collections
 import json
 import os
 import sys
@@ -65,6 +66,7 @@ agent = AsyncAgent(
 )
 
 seen_turns: set[str] = set()
+seen_turns_order: collections.deque[str] = collections.deque()
 MAX_SEEN_TURNS = 500
 
 
@@ -142,9 +144,9 @@ async def handle(msg: RoomEvent) -> None:
     if not turn_id or turn_id in seen_turns:
         return
     seen_turns.add(turn_id)
-    if len(seen_turns) > MAX_SEEN_TURNS:
-        seen_turns.clear()
-        seen_turns.add(turn_id)
+    seen_turns_order.append(turn_id)
+    while len(seen_turns) > MAX_SEEN_TURNS:
+        seen_turns.discard(seen_turns_order.popleft())
     say(agent.handle, f"reviewing via {BOLD}{LLM_BASE_URL}{RESET}")
     progress_state = {"summary": "Critic started streaming review output."}
     progress_task = asyncio.create_task(
