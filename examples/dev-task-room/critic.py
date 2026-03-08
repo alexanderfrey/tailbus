@@ -18,6 +18,7 @@ from dev_task_common import (
     BOLD,
     GREEN,
     LLM_BASE_URL,
+    REVIEW_TIMEOUT,
     TURN_PROGRESS_INTERVAL,
     RESET,
     YELLOW,
@@ -80,13 +81,34 @@ async def review_turn(room_id: str, payload: dict[str, object]) -> dict[str, obj
         f"Proposed change set:\n{json.dumps(payload.get('change_set', {}), indent=2)}\n"
     )
     started = time.monotonic()
+
     def on_chunk(text: str) -> None:
         if isinstance(progress_state, dict):
             cleaned = " ".join(text.strip().split())
             if cleaned:
                 progress_state["summary"] = f"Critic streaming: {cleaned[-120:]}"
 
-    raw = (await asyncio.to_thread(llm_stream_call, SYSTEM_PROMPT, user_prompt, on_chunk=on_chunk)).strip()
+    try:
+        raw = (
+            await asyncio.wait_for(
+                asyncio.shield(
+                    asyncio.to_thread(llm_stream_call, SYSTEM_PROMPT, user_prompt, on_chunk=on_chunk)
+                ),
+                timeout=REVIEW_TIMEOUT,
+            )
+        ).strip()
+    except asyncio.TimeoutError:
+        elapsed = round(time.monotonic() - started, 1)
+        return {
+            "kind": "review_reply",
+            "turn_id": payload.get("turn_id", ""),
+            "author": agent.handle,
+            "status": "error",
+            "capability": "dev.review",
+            "summary": "",
+            "error": f"LM Studio review timed out after {REVIEW_TIMEOUT:.0f}s",
+            "elapsed_sec": elapsed,
+        }
     elapsed = round(time.monotonic() - started, 1)
     if raw.startswith("[LLM error]"):
         return {
@@ -179,7 +201,7 @@ async def handle(msg: RoomEvent) -> None:
         progress_task.cancel()
         try:
             await progress_task
-        except asyncio.CancelledError:
+        except (asyncio.CancelledError, Exception):
             pass
     if reply["status"] == "ok":
         say(agent.handle, f"{GREEN}posted{RESET} review in {reply['elapsed_sec']:.1f}s")

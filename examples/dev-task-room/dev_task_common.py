@@ -13,7 +13,7 @@ import time
 import urllib.error
 import urllib.request
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, Iterable
 
 sys_path = os.path.join(os.path.dirname(__file__), "../../sdk/python/src")
 if sys_path not in sys.path:
@@ -25,6 +25,8 @@ ROOM_REPLAY_RETRIES = int(os.environ.get("DEV_TASK_ROOM_REPLAY_RETRIES", "12"))
 ROOM_REPLAY_DELAY = float(os.environ.get("DEV_TASK_ROOM_REPLAY_DELAY", "0.5"))
 LLM_BASE_URL = os.environ.get("LLM_BASE_URL", "http://localhost:1234/v1")
 LLM_MODEL = os.environ.get("LLM_MODEL", "")
+LLM_REQUEST_TIMEOUT = float(os.environ.get("LLM_REQUEST_TIMEOUT", "180"))
+REVIEW_TIMEOUT = float(os.environ.get("REVIEW_TIMEOUT", "120"))
 CODEX_TIMEOUT = int(os.environ.get("CODEX_TIMEOUT", "600"))
 CODEX_MODEL = os.environ.get("CODEX_MODEL", "gpt-5.1-codex-mini")
 MAX_SNAPSHOT_CHARS = int(os.environ.get("DEV_TASK_ROOM_SNAPSHOT_CHARS", "24000"))
@@ -224,42 +226,50 @@ def llm_stream_call(
         data=data,
         headers={"Content-Type": "application/json"},
     )
-    chunks: list[str] = []
     try:
-        with urllib.request.urlopen(req, timeout=180) as resp:
-            for raw_line in resp:
-                line = raw_line.decode("utf-8", errors="ignore").strip()
-                if not line or not line.startswith("data:"):
-                    continue
-                payload = line[5:].strip()
-                if payload == "[DONE]":
-                    break
-                try:
-                    event = json.loads(payload)
-                except json.JSONDecodeError:
-                    continue
-                choices = event.get("choices", [])
-                if not choices:
-                    continue
-                choice = choices[0]
-                delta = choice.get("delta", {})
-                text = ""
-                if isinstance(delta, dict):
-                    text = str(delta.get("content", "") or "")
-                if not text and "message" in choice:
-                    message = choice.get("message", {})
-                    if isinstance(message, dict):
-                        text = str(message.get("content", "") or "")
-                if not text:
-                    continue
-                chunks.append(text)
-                if on_chunk is not None:
-                    on_chunk("".join(chunks))
-        return "".join(chunks)
+        with urllib.request.urlopen(req, timeout=LLM_REQUEST_TIMEOUT) as resp:
+            return collect_streamed_llm_text(resp, on_chunk=on_chunk)
     except urllib.error.URLError as exc:
         return f"[LLM error] Could not reach LM Studio at {LLM_BASE_URL}: {exc.reason}"
     except Exception as exc:  # pragma: no cover - defensive example code
         return f"[LLM error] {exc}"
+
+
+def collect_streamed_llm_text(
+    lines: Iterable[bytes],
+    *,
+    on_chunk: Callable[[str], None] | None = None,
+) -> str:
+    chunks: list[str] = []
+    for raw_line in lines:
+        line = raw_line.decode("utf-8", errors="ignore").strip()
+        if not line or not line.startswith("data:"):
+            continue
+        payload = line[5:].strip()
+        if payload == "[DONE]":
+            break
+        try:
+            event = json.loads(payload)
+        except json.JSONDecodeError:
+            continue
+        choices = event.get("choices", [])
+        if not choices:
+            continue
+        choice = choices[0]
+        delta = choice.get("delta", {})
+        text = ""
+        if isinstance(delta, dict):
+            text = str(delta.get("content", "") or "")
+        if not text and "message" in choice:
+            message = choice.get("message", {})
+            if isinstance(message, dict):
+                text = str(message.get("content", "") or "")
+        if not text:
+            continue
+        chunks.append(text)
+        if on_chunk is not None:
+            on_chunk("".join(chunks))
+    return "".join(chunks)
 
 
 def strip_code_fences(text: str) -> str:
@@ -484,7 +494,8 @@ async def progress_pinger(
         except Exception as exc:
             if is_room_closed_error(exc):
                 return
-            raise
+            say(target_handle, f"{YELLOW}progress ping failed{RESET}: {exc}")
+            continue
 
 
 def build_output_markdown(

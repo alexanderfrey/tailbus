@@ -196,7 +196,7 @@ async def handle(msg: RoomEvent) -> None:
         progress_task.cancel()
         try:
             await progress_task
-        except asyncio.CancelledError:
+        except (asyncio.CancelledError, Exception):
             pass
     if reply["status"] == "ok":
         say(agent.handle, f"{GREEN}posted{RESET} implementation in {reply['elapsed_sec']:.1f}s")
