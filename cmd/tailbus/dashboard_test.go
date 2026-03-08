@@ -72,6 +72,15 @@ func (s *fakeActivityStream) Recv() (*agentpb.ActivityEvent, error) {
 	return nil, io.EOF
 }
 
+type fakeDashboardCloser struct {
+	closed int
+}
+
+func (c *fakeDashboardCloser) Close() error {
+	c.closed++
+	return nil
+}
+
 func TestDashboardClearsStatusOnDisconnect(t *testing.T) {
 	model := newDashboardModel(&fakeDashboardClient{})
 	model.status = &agentpb.GetNodeStatusResponse{NodeId: "node-1"}
@@ -121,6 +130,83 @@ func TestDashboardResubscribesAfterActivityDisconnect(t *testing.T) {
 	}
 	if client.watchCalls != 1 {
 		t.Fatalf("expected one watch attempt, got %d", client.watchCalls)
+	}
+}
+
+func TestReconnectingDashboardClientRedialsStatusRequests(t *testing.T) {
+	firstCloser := &fakeDashboardCloser{}
+	secondCloser := &fakeDashboardCloser{}
+	dialCalls := 0
+	client := &reconnectingDashboardClient{
+		dial: func() (dashboardClient, dashboardCloser, error) {
+			dialCalls++
+			switch dialCalls {
+			case 1:
+				return &fakeDashboardClient{
+					getStatusResp: &agentpb.GetNodeStatusResponse{NodeId: "node-1"},
+				}, firstCloser, nil
+			case 2:
+				return &fakeDashboardClient{
+					getStatusResp: &agentpb.GetNodeStatusResponse{NodeId: "node-2"},
+				}, secondCloser, nil
+			default:
+				t.Fatalf("unexpected extra dial %d", dialCalls)
+				return nil, nil, nil
+			}
+		},
+	}
+
+	resp1, err := client.GetNodeStatus(context.Background(), &agentpb.GetNodeStatusRequest{})
+	if err != nil {
+		t.Fatalf("first GetNodeStatus: %v", err)
+	}
+	resp2, err := client.GetNodeStatus(context.Background(), &agentpb.GetNodeStatusRequest{})
+	if err != nil {
+		t.Fatalf("second GetNodeStatus: %v", err)
+	}
+
+	if resp1.NodeId != "node-1" || resp2.NodeId != "node-2" {
+		t.Fatalf("unexpected status responses: %q then %q", resp1.NodeId, resp2.NodeId)
+	}
+	if dialCalls != 2 {
+		t.Fatalf("dial calls = %d, want 2", dialCalls)
+	}
+	if firstCloser.closed != 1 || secondCloser.closed != 1 {
+		t.Fatalf("expected each status connection to be closed once, got %d and %d", firstCloser.closed, secondCloser.closed)
+	}
+}
+
+func TestReconnectingDashboardClientClosesWatchConnectionOnStreamEnd(t *testing.T) {
+	closer := &fakeDashboardCloser{}
+	stream := &fakeActivityStream{
+		events: []*agentpb.ActivityEvent{
+			{Event: &agentpb.ActivityEvent_HandleRegistered{HandleRegistered: &agentpb.HandleRegisteredEvent{Handle: "solver"}}},
+		},
+		recvErr: io.EOF,
+	}
+	client := &reconnectingDashboardClient{
+		dial: func() (dashboardClient, dashboardCloser, error) {
+			return &fakeDashboardClient{
+				watchStreams: []grpc.ServerStreamingClient[agentpb.ActivityEvent]{stream},
+			}, closer, nil
+		},
+	}
+
+	watch, err := client.WatchActivity(context.Background(), &agentpb.WatchActivityRequest{})
+	if err != nil {
+		t.Fatalf("WatchActivity: %v", err)
+	}
+	if _, err := watch.Recv(); err != nil {
+		t.Fatalf("first Recv: %v", err)
+	}
+	if closer.closed != 0 {
+		t.Fatalf("connection closed too early: %d", closer.closed)
+	}
+	if _, err := watch.Recv(); err != io.EOF {
+		t.Fatalf("second Recv error = %v, want EOF", err)
+	}
+	if closer.closed != 1 {
+		t.Fatalf("expected watch connection to close on stream end, got %d", closer.closed)
 	}
 }
 
@@ -229,6 +315,62 @@ func TestDashboardBusyTurnTracksProgress(t *testing.T) {
 	updated = next.(dashboardModel)
 	if _, ok := updated.busyTurns["turn-1"]; ok {
 		t.Fatal("expected busy turn to be cleared after reply")
+	}
+}
+
+func TestDashboardBusyTurnClearsOnImplementReply(t *testing.T) {
+	model := newDashboardModel(&fakeDashboardClient{})
+
+	next, _ := model.Update(activityMsg(&agentpb.ActivityEvent{
+		Event: &agentpb.ActivityEvent_RoomMessagePosted{
+			RoomMessagePosted: &agentpb.RoomMessagePostedEvent{
+				RoomId:       "room-1",
+				FromHandle:   "task-orchestrator",
+				TargetHandle: "implementer",
+				TurnId:       "turn-1",
+				ContentKind:  "turn_request",
+				Round:        1,
+			},
+		},
+	}))
+	updated := next.(dashboardModel)
+	if _, ok := updated.busyTurns["turn-1"]; !ok {
+		t.Fatal("expected busy turn after turn_request")
+	}
+
+	next, _ = updated.Update(activityMsg(&agentpb.ActivityEvent{
+		Event: &agentpb.ActivityEvent_RoomMessagePosted{
+			RoomMessagePosted: &agentpb.RoomMessagePostedEvent{
+				RoomId:      "room-1",
+				FromHandle:  "implementer",
+				TurnId:      "turn-1",
+				ContentKind: "implement_reply",
+				Status:      "ok",
+				Round:       1,
+			},
+		},
+	}))
+	updated = next.(dashboardModel)
+	if _, ok := updated.busyTurns["turn-1"]; ok {
+		t.Fatal("expected busy turn to be cleared after implement_reply")
+	}
+}
+
+func TestActivityEntryFormatsImplementReplyAsReply(t *testing.T) {
+	entry := formatActivity(&agentpb.ActivityEvent{
+		Timestamp: timestamppb.New(time.Unix(0, 0)),
+		Event: &agentpb.ActivityEvent_RoomMessagePosted{
+			RoomMessagePosted: &agentpb.RoomMessagePostedEvent{
+				RoomId:      "room-1",
+				FromHandle:  "implementer",
+				ContentKind: "implement_reply",
+				Status:      "ok",
+				Round:       2,
+			},
+		},
+	})
+	if !strings.Contains(entry.label, "REPLY room-1 r2 implementer [ok]") {
+		t.Fatalf("unexpected label %q", entry.label)
 	}
 }
 

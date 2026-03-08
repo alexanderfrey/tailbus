@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	agentpb "github.com/alexanderfrey/tailbus/api/agentpb"
@@ -12,6 +13,8 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 )
 
@@ -157,6 +160,22 @@ type dashboardClient interface {
 	WatchActivity(ctx context.Context, in *agentpb.WatchActivityRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[agentpb.ActivityEvent], error)
 }
 
+type dashboardCloser interface {
+	Close() error
+}
+
+type dashboardClientDialer func() (dashboardClient, dashboardCloser, error)
+
+type reconnectingDashboardClient struct {
+	dial dashboardClientDialer
+}
+
+type reconnectingActivityStream struct {
+	stream grpc.ServerStreamingClient[agentpb.ActivityEvent]
+	conn   dashboardCloser
+	once   sync.Once
+}
+
 type dashboardModel struct {
 	client    dashboardClient
 	status    *agentpb.GetNodeStatusResponse
@@ -184,6 +203,90 @@ func newDashboardModel(client dashboardClient) dashboardModel {
 		client:    client,
 		busyTurns: make(map[string]busyTurn),
 	}
+}
+
+func newReconnectingDashboardClient(socketPath, token string) dashboardClient {
+	return &reconnectingDashboardClient{
+		dial: newGRPCDashboardDialer(socketPath, token),
+	}
+}
+
+func newGRPCDashboardDialer(socketPath, token string) dashboardClientDialer {
+	return func() (dashboardClient, dashboardCloser, error) {
+		dialOpts := []grpc.DialOption{grpc.WithTransportCredentials(insecure.NewCredentials())}
+		if token != "" {
+			dialOpts = append(dialOpts, grpc.WithPerRPCCredentials(tokenCreds{token: token}))
+		}
+		conn, err := grpc.NewClient("unix://"+socketPath, dialOpts...)
+		if err != nil {
+			return nil, nil, err
+		}
+		return agentpb.NewAgentAPIClient(conn), conn, nil
+	}
+}
+
+func (c *reconnectingDashboardClient) GetNodeStatus(ctx context.Context, in *agentpb.GetNodeStatusRequest, opts ...grpc.CallOption) (*agentpb.GetNodeStatusResponse, error) {
+	client, conn, err := c.dial()
+	if err != nil {
+		return nil, err
+	}
+	defer conn.Close()
+	return client.GetNodeStatus(ctx, in, opts...)
+}
+
+func (c *reconnectingDashboardClient) WatchActivity(ctx context.Context, in *agentpb.WatchActivityRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[agentpb.ActivityEvent], error) {
+	client, conn, err := c.dial()
+	if err != nil {
+		return nil, err
+	}
+	stream, err := client.WatchActivity(ctx, in, opts...)
+	if err != nil {
+		_ = conn.Close()
+		return nil, err
+	}
+	return &reconnectingActivityStream{stream: stream, conn: conn}, nil
+}
+
+func (s *reconnectingActivityStream) Header() (metadata.MD, error) { return s.stream.Header() }
+func (s *reconnectingActivityStream) Trailer() metadata.MD         { return s.stream.Trailer() }
+func (s *reconnectingActivityStream) Context() context.Context     { return s.stream.Context() }
+
+func (s *reconnectingActivityStream) CloseSend() error {
+	err := s.stream.CloseSend()
+	s.closeConn()
+	return err
+}
+
+func (s *reconnectingActivityStream) SendMsg(m any) error {
+	err := s.stream.SendMsg(m)
+	if err != nil {
+		s.closeConn()
+	}
+	return err
+}
+
+func (s *reconnectingActivityStream) RecvMsg(m any) error {
+	err := s.stream.RecvMsg(m)
+	if err != nil {
+		s.closeConn()
+	}
+	return err
+}
+
+func (s *reconnectingActivityStream) Recv() (*agentpb.ActivityEvent, error) {
+	event, err := s.stream.Recv()
+	if err != nil {
+		s.closeConn()
+	}
+	return event, err
+}
+
+func (s *reconnectingActivityStream) closeConn() {
+	s.once.Do(func() {
+		if s.conn != nil {
+			_ = s.conn.Close()
+		}
+	})
 }
 
 func (m dashboardModel) Init() tea.Cmd {
@@ -454,6 +557,14 @@ func formatActivity(event *agentpb.ActivityEvent) activityEntry {
 			label := fmt.Sprintf("FINAL %s by %s%s", roomID, e.RoomMessagePosted.FromHandle, traceTag)
 			return activityEntry{time: ts, label: label, style: actRoomStyle}
 		}
+		if isTurnReplyKind(e.RoomMessagePosted.ContentKind) {
+			status := e.RoomMessagePosted.Status
+			if status == "" {
+				status = "ok"
+			}
+			label := fmt.Sprintf("REPLY %s r%d %s [%s]%s", roomID, e.RoomMessagePosted.Round, e.RoomMessagePosted.FromHandle, status, traceTag)
+			return activityEntry{time: ts, label: label, style: actRoomStyle}
+		}
 		recipients := len(e.RoomMessagePosted.MemberHandles) - 1
 		if recipients < 0 {
 			recipients = 0
@@ -496,6 +607,10 @@ func shouldDisplayActivity(event *agentpb.ActivityEvent) bool {
 	default:
 		return true
 	}
+}
+
+func isTurnReplyKind(kind string) bool {
+	return strings.HasSuffix(kind, "_reply") || kind == "apply_result"
 }
 
 func (m *dashboardModel) updateBusyTurns(event *agentpb.RoomMessagePostedEvent, now time.Time) {
@@ -543,8 +658,12 @@ func (m *dashboardModel) updateBusyTurns(event *agentpb.RoomMessagePostedEvent, 
 		bt.status = "working"
 		bt.lastUpdate = now
 		m.busyTurns[turnID] = bt
-	case "solver_reply", "turn_timeout":
+	case "turn_timeout":
 		delete(m.busyTurns, turnID)
+	default:
+		if isTurnReplyKind(event.ContentKind) {
+			delete(m.busyTurns, turnID)
+		}
 	}
 }
 
@@ -1155,7 +1274,7 @@ func renderNodeBox(n topoNode, isLocal bool, active bool, activeHandles map[stri
 }
 
 func animatedBorderSide(frame, offset int) string {
-	if ((frame / 3) + offset) % 2 == 0 {
+	if ((frame/3)+offset)%2 == 0 {
 		return flashNodeStyle.Render("|")
 	}
 	return flashNodeStyle.Reverse(true).Render("|")
@@ -1584,9 +1703,9 @@ func (m dashboardModel) renderActivity(width, maxLines int) string {
 	return strings.TrimRight(b.String(), "\n")
 }
 
-func runDashboard(client agentpb.AgentAPIClient) error {
+func runDashboard(socketPath, token string) error {
 	p := tea.NewProgram(
-		newDashboardModel(client),
+		newDashboardModel(newReconnectingDashboardClient(socketPath, token)),
 		tea.WithAltScreen(),
 	)
 	_, err := p.Run()

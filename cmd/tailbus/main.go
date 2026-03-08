@@ -276,6 +276,18 @@ func main() {
 	}
 
 	// All other commands require a daemon connection
+	if args[0] == "dashboard" {
+		token := ""
+		if tokenData, err := os.ReadFile(*socketPath + ".token"); err == nil {
+			token = string(tokenData)
+		}
+		if err := runDashboard(*socketPath, token); err != nil {
+			logger.Error("dashboard error", "error", err)
+			os.Exit(1)
+		}
+		return
+	}
+
 	dialOpts := []grpc.DialOption{grpc.WithTransportCredentials(insecure.NewCredentials())}
 	if tokenData, err := os.ReadFile(*socketPath + ".token"); err == nil {
 		dialOpts = append(dialOpts, grpc.WithPerRPCCredentials(tokenCreds{token: string(tokenData)}))
@@ -546,12 +558,6 @@ func main() {
 		// Unload launchd service on macOS so it doesn't auto-restart
 		unloadLaunchd(logger)
 		fmt.Println("tailbusd stopped")
-
-	case "dashboard":
-		if err := runDashboard(client); err != nil {
-			logger.Error("dashboard error", "error", err)
-			os.Exit(1)
-		}
 
 	case "trace":
 		if len(args) < 2 {
