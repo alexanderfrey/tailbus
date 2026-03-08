@@ -45,11 +45,15 @@ type fakeActivityStream struct {
 	events  []*agentpb.ActivityEvent
 	recvErr error
 	index   int
+	closed  int
 }
 
 func (s *fakeActivityStream) Header() (metadata.MD, error) { return metadata.MD{}, nil }
 func (s *fakeActivityStream) Trailer() metadata.MD         { return metadata.MD{} }
-func (s *fakeActivityStream) CloseSend() error             { return nil }
+func (s *fakeActivityStream) CloseSend() error {
+	s.closed++
+	return nil
+}
 func (s *fakeActivityStream) Context() context.Context {
 	if s.ctx != nil {
 		return s.ctx
@@ -130,6 +134,43 @@ func TestDashboardResubscribesAfterActivityDisconnect(t *testing.T) {
 	}
 	if client.watchCalls != 1 {
 		t.Fatalf("expected one watch attempt, got %d", client.watchCalls)
+	}
+}
+
+func TestDashboardWatchActivityClosesStreamAfterRecv(t *testing.T) {
+	stream := &fakeActivityStream{
+		events: []*agentpb.ActivityEvent{
+			{Event: &agentpb.ActivityEvent_HandleRegistered{HandleRegistered: &agentpb.HandleRegisteredEvent{Handle: "solver"}}},
+		},
+	}
+	model := newDashboardModel(&fakeDashboardClient{
+		watchStreams: []grpc.ServerStreamingClient[agentpb.ActivityEvent]{stream},
+	})
+
+	msg := model.watchActivity()
+	if _, ok := msg.(activityMsg); !ok {
+		t.Fatalf("expected activityMsg, got %T", msg)
+	}
+	if stream.closed != 1 {
+		t.Fatalf("expected stream to be closed after recv, got %d", stream.closed)
+	}
+}
+
+func TestDashboardIgnoresNilRoomMessagePosted(t *testing.T) {
+	model := newDashboardModel(&fakeDashboardClient{})
+
+	next, cmd := model.Update(activityMsg(&agentpb.ActivityEvent{
+		Event: &agentpb.ActivityEvent_RoomMessagePosted{},
+	}))
+	if cmd == nil {
+		t.Fatal("expected watchNext command")
+	}
+	updated := next.(dashboardModel)
+	if len(updated.activity) != 0 {
+		t.Fatalf("expected no activity for nil room message, got %d entries", len(updated.activity))
+	}
+	if len(updated.busyTurns) != 0 {
+		t.Fatalf("expected no busy turns for nil room message, got %d", len(updated.busyTurns))
 	}
 }
 
@@ -371,6 +412,50 @@ func TestActivityEntryFormatsImplementReplyAsReply(t *testing.T) {
 	})
 	if !strings.Contains(entry.label, "REPLY room-1 r2 implementer [ok]") {
 		t.Fatalf("unexpected label %q", entry.label)
+	}
+}
+
+func TestActivityEntryShortensShortSessionIDsSafely(t *testing.T) {
+	entry := formatActivity(&agentpb.ActivityEvent{
+		Timestamp: timestamppb.New(time.Unix(0, 0)),
+		Event: &agentpb.ActivityEvent_SessionOpened{
+			SessionOpened: &agentpb.SessionOpenedEvent{
+				FromHandle: "a",
+				ToHandle:   "b",
+				SessionId:  "xyz",
+			},
+		},
+	})
+	if !strings.Contains(entry.label, "(xyz)") {
+		t.Fatalf("unexpected label %q", entry.label)
+	}
+}
+
+func TestDashboardPrunesStaleBusyTurns(t *testing.T) {
+	model := newDashboardModel(&fakeDashboardClient{})
+	now := time.Now()
+	model.busyTurns["stale"] = busyTurn{
+		turnID:     "stale",
+		fromHandle: "task-orchestrator",
+		toHandle:   "implementer",
+		since:      now.Add(-busyTurnStaleAfter - time.Second),
+		lastUpdate: now.Add(-busyTurnStaleAfter - time.Second),
+	}
+	model.busyTurns["fresh"] = busyTurn{
+		turnID:     "fresh",
+		fromHandle: "task-orchestrator",
+		toHandle:   "critic",
+		since:      now,
+		lastUpdate: now,
+	}
+
+	next, _ := model.Update(animTickMsg(now))
+	updated := next.(dashboardModel)
+	if _, ok := updated.busyTurns["stale"]; ok {
+		t.Fatal("expected stale busy turn to be pruned")
+	}
+	if _, ok := updated.busyTurns["fresh"]; !ok {
+		t.Fatal("expected fresh busy turn to remain")
 	}
 }
 

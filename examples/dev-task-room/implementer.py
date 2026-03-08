@@ -22,6 +22,7 @@ from dev_task_common import (
     RED,
     RESET,
     YELLOW,
+    is_room_closed_error,
     parse_json,
     progress_pinger,
     replay_room_with_retry,
@@ -29,6 +30,7 @@ from dev_task_common import (
     run_codex_json,
     say,
     tmp_json_path,
+    truncate_preserving_ends,
 )
 
 SYSTEM_PROMPT = """You are the implementation specialist in a Tailbus engineering room.
@@ -95,7 +97,8 @@ async def implement_turn(room_id: str, payload: dict[str, object]) -> dict[str, 
     task = room_task_from_events(events)
     transcript = "\n".join(
         event.payload for event in events if event.event_type == "message_posted" and event.content_type == "application/json"
-    )[-12000:]
+    )
+    transcript = truncate_preserving_ends(transcript, 12000)
     prompt = build_prompt(payload, task, transcript)
     output_path = tmp_json_path("dev_task_implement", str(payload.get("turn_id", "")))
     started = time.monotonic()
@@ -193,12 +196,18 @@ async def handle(msg: RoomEvent) -> None:
         say(agent.handle, f"{GREEN}posted{RESET} implementation in {reply['elapsed_sec']:.1f}s")
     else:
         say(agent.handle, f"{RED}error{RESET}: {reply.get('error', 'unknown error')}")
-    await agent.post_room_message(
-        msg.room_id,
-        json.dumps(reply),
-        content_type="application/json",
-        trace_id=turn_id,
-    )
+    try:
+        await agent.post_room_message(
+            msg.room_id,
+            json.dumps(reply),
+            content_type="application/json",
+            trace_id=turn_id,
+        )
+    except Exception as exc:
+        if is_room_closed_error(exc):
+            say(agent.handle, f"{YELLOW}room closed{RESET} before implementation reply could be posted")
+        else:
+            raise
 
 
 async def main() -> None:

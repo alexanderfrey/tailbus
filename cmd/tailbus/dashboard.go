@@ -122,6 +122,7 @@ type activityErrMsg struct{ error }
 type watchRetryMsg struct{}
 
 const watchRetryDelay = 1500 * time.Millisecond
+const busyTurnStaleAfter = 30 * time.Second
 
 // edgeFlash represents a recent message flow between two handles.
 type edgeFlash struct {
@@ -325,6 +326,7 @@ func (m dashboardModel) watchActivity() tea.Msg {
 	if err != nil {
 		return activityErrMsg{err}
 	}
+	defer stream.CloseSend()
 	event, err := stream.Recv()
 	if err != nil {
 		return activityErrMsg{err}
@@ -421,6 +423,9 @@ func (m dashboardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				at:         now,
 			})
 		case *agentpb.ActivityEvent_RoomMessagePosted:
+			if e.RoomMessagePosted == nil {
+				return m, m.watchNext
+			}
 			m.updateBusyTurns(e.RoomMessagePosted, now)
 			for _, member := range e.RoomMessagePosted.MemberHandles {
 				if member == "" || member == e.RoomMessagePosted.FromHandle {
@@ -453,6 +458,7 @@ func (m dashboardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 		m.flashes = active
+		m.pruneBusyTurns(now)
 		return m, animTickCmd()
 
 	case tickMsg:
@@ -491,13 +497,13 @@ func formatActivity(event *agentpb.ActivityEvent) activityEntry {
 	case *agentpb.ActivityEvent_SessionOpened:
 		return activityEntry{
 			time:  ts,
-			label: fmt.Sprintf("OPEN %s -> %s (%s)", e.SessionOpened.FromHandle, e.SessionOpened.ToHandle, e.SessionOpened.SessionId[:8]),
+			label: fmt.Sprintf("OPEN %s -> %s (%s)", e.SessionOpened.FromHandle, e.SessionOpened.ToHandle, shortID(e.SessionOpened.SessionId)),
 			style: actSessStyle,
 		}
 	case *agentpb.ActivityEvent_SessionResolved:
 		return activityEntry{
 			time:  ts,
-			label: fmt.Sprintf("RESOLVE %s (%s)", e.SessionResolved.FromHandle, e.SessionResolved.SessionId[:8]),
+			label: fmt.Sprintf("RESOLVE %s (%s)", e.SessionResolved.FromHandle, shortID(e.SessionResolved.SessionId)),
 			style: actSessStyle,
 		}
 	case *agentpb.ActivityEvent_HandleRegistered:
@@ -603,7 +609,7 @@ func shouldDisplayActivity(event *agentpb.ActivityEvent) bool {
 	}
 	switch e := event.Event.(type) {
 	case *agentpb.ActivityEvent_RoomMessagePosted:
-		return e.RoomMessagePosted == nil || e.RoomMessagePosted.ContentKind != "turn_progress"
+		return e.RoomMessagePosted != nil && e.RoomMessagePosted.ContentKind != "turn_progress"
 	default:
 		return true
 	}
@@ -662,6 +668,18 @@ func (m *dashboardModel) updateBusyTurns(event *agentpb.RoomMessagePostedEvent, 
 		delete(m.busyTurns, turnID)
 	default:
 		if isTurnReplyKind(event.ContentKind) {
+			delete(m.busyTurns, turnID)
+		}
+	}
+}
+
+func (m *dashboardModel) pruneBusyTurns(now time.Time) {
+	for turnID, turn := range m.busyTurns {
+		last := turn.lastUpdate
+		if last.IsZero() {
+			last = turn.since
+		}
+		if !last.IsZero() && now.Sub(last) > busyTurnStaleAfter {
 			delete(m.busyTurns, turnID)
 		}
 	}

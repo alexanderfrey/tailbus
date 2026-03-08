@@ -18,13 +18,13 @@ sys_path = os.path.join(os.path.dirname(__file__), "../../sdk/python/src")
 if sys_path not in os.sys.path:
     os.sys.path.insert(0, sys_path)
 
-from tailbus import AsyncAgent, Manifest, RoomEvent
+from tailbus import AsyncAgent, BridgeError, Manifest, RoomEvent
 
 ROOM_REPLAY_RETRIES = int(os.environ.get("DEV_TASK_ROOM_REPLAY_RETRIES", "12"))
 ROOM_REPLAY_DELAY = float(os.environ.get("DEV_TASK_ROOM_REPLAY_DELAY", "0.5"))
 LLM_BASE_URL = os.environ.get("LLM_BASE_URL", "http://localhost:1234/v1")
 LLM_MODEL = os.environ.get("LLM_MODEL", "")
-CODEX_TIMEOUT = int(os.environ.get("CODEX_TIMEOUT", "120"))
+CODEX_TIMEOUT = int(os.environ.get("CODEX_TIMEOUT", "600"))
 CODEX_MODEL = os.environ.get("CODEX_MODEL", "gpt-5.1-codex-mini")
 MAX_SNAPSHOT_CHARS = int(os.environ.get("DEV_TASK_ROOM_SNAPSHOT_CHARS", "24000"))
 TURN_PROGRESS_INTERVAL = float(os.environ.get("DEV_TASK_ROOM_PROGRESS_INTERVAL", "4"))
@@ -42,7 +42,7 @@ CYAN = "\033[36m"
 RESET = "\033[0m"
 
 SCENARIOS: dict[str, str] = {
-    "retry-client": "Add exponential backoff retry support to the HTTP client and update tests accordingly.",
+    "snake-clone": "Build a simple Snake clone in Python using only the standard library. Include a playable interface, food spawning, score tracking, wall and self collision, restart handling, and unit tests for the core game logic.",
     "parser-edge-case": "Extend the CSV parser so quoted commas are handled correctly and add coverage for the edge case.",
     "todo-filter": "Make the todo status filter case-insensitive and ensure the tests cover mixed-case input.",
 }
@@ -51,15 +51,22 @@ WORKSPACE_FILES: tuple[str, ...] = (
     "README.md",
     "client.py",
     "parser.py",
+    "snake.py",
+    "snake_game.py",
     "todo.py",
     "tests/test_client.py",
     "tests/test_parser.py",
+    "tests/test_snake_game.py",
     "tests/test_todo.py",
 )
 
 
 def say(tag: str, msg: str) -> None:
     print(f"  {DIM}{tag}{RESET}  {msg}", flush=True)
+
+
+def is_room_closed_error(exc: Exception) -> bool:
+    return isinstance(exc, BridgeError) and "room" in str(exc).lower() and "is closed" in str(exc).lower()
 
 
 def parse_json(payload: str) -> dict[str, Any] | None:
@@ -109,7 +116,7 @@ def iter_workspace_files() -> tuple[str, ...]:
 def read_workspace_snapshot() -> str:
     ensure_workspace_exists()
     chunks: list[str] = []
-    for rel_path in WORKSPACE_FILES:
+    for rel_path in select_workspace_snapshot_files(iter_workspace_files()):
         path = WORKSPACE_ROOT / rel_path
         if not path.exists():
             continue
@@ -122,6 +129,30 @@ def read_workspace_snapshot() -> str:
     if len(snapshot) > MAX_SNAPSHOT_CHARS:
         return snapshot[: MAX_SNAPSHOT_CHARS - 32] + "\n\n[workspace snapshot truncated]"
     return snapshot
+
+
+def select_workspace_snapshot_files(files: tuple[str, ...]) -> tuple[str, ...]:
+    selected: list[str] = []
+    seen: set[str] = set()
+
+    for rel_path in WORKSPACE_FILES:
+        if rel_path in files and rel_path not in seen:
+            selected.append(rel_path)
+            seen.add(rel_path)
+
+    for rel_path in files:
+        if rel_path in seen:
+            continue
+        parts = Path(rel_path).parts
+        if any(part.startswith(".") or part == "__pycache__" for part in parts):
+            continue
+        suffix = Path(rel_path).suffix
+        if suffix not in {".py", ".md", ".txt"}:
+            continue
+        selected.append(rel_path)
+        seen.add(rel_path)
+
+    return tuple(selected)
 
 
 def room_task_from_events(events: list[RoomEvent]) -> dict[str, Any]:
@@ -233,8 +264,25 @@ def llm_stream_call(
 def strip_code_fences(text: str) -> str:
     value = text.strip()
     if value.startswith("```"):
-        value = value.split("\n", 1)[1].rsplit("```", 1)[0].strip()
+        first_newline = value.find("\n")
+        if first_newline == -1:
+            return ""
+        value = value[first_newline + 1 :]
+        if value.endswith("```"):
+            value = value[:-3]
+        value = value.strip()
     return value
+
+
+def truncate_preserving_ends(text: str, limit_chars: int, marker: str = "\n...\n") -> str:
+    if len(text) <= limit_chars:
+        return text
+    if limit_chars <= len(marker):
+        return text[:limit_chars]
+    remaining = limit_chars - len(marker)
+    head = remaining // 2
+    tail = remaining - head
+    return text[:head] + marker + text[-tail:]
 
 
 def parse_json_object(text: str) -> dict[str, Any] | None:
@@ -422,12 +470,17 @@ async def progress_pinger(
             "summary": summary() if callable(summary) else summary,
             "elapsed_sec": round(elapsed, 1),
         }
-        await agent.post_room_message(
-            room_id,
-            json.dumps(payload),
-            content_type="application/json",
-            trace_id=turn_id,
-        )
+        try:
+            await agent.post_room_message(
+                room_id,
+                json.dumps(payload),
+                content_type="application/json",
+                trace_id=turn_id,
+            )
+        except Exception as exc:
+            if is_room_closed_error(exc):
+                return
+            raise
 
 
 def build_output_markdown(

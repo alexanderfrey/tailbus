@@ -7,7 +7,6 @@ import asyncio
 import json
 import os
 import shutil
-import subprocess
 import sys
 import time
 from pathlib import Path
@@ -24,6 +23,7 @@ from dev_task_common import (
     RESET,
     WORKSPACE_ROOT,
     ensure_workspace_exists,
+    is_room_closed_error,
     iter_workspace_files,
     parse_json,
     read_workspace_snapshot,
@@ -86,20 +86,38 @@ def apply_change_set(change_set: dict[str, Any]) -> list[str]:
     return sorted(set(changed_paths))
 
 
-def run_fixture_tests() -> dict[str, Any]:
+async def run_fixture_tests() -> dict[str, Any]:
     ensure_workspace_exists()
-    proc = subprocess.run(
-        [sys.executable, "-m", "unittest", "discover", "-s", "tests", "-p", "test_*.py"],
+    proc = await asyncio.create_subprocess_exec(
+        sys.executable,
+        "-m",
+        "unittest",
+        "discover",
+        "-s",
+        "tests",
+        "-p",
+        "test_*.py",
         cwd=WORKSPACE_ROOT,
-        capture_output=True,
-        text=True,
-        timeout=WORKSPACE_TIMEOUT,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
     )
-    output = (proc.stdout + ("\n" + proc.stderr if proc.stderr else "")).strip()
-    summary = "All fixture tests passed." if proc.returncode == 0 else "Fixture tests failed."
+    timed_out = False
+    try:
+        stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=WORKSPACE_TIMEOUT)
+    except asyncio.TimeoutError:
+        timed_out = True
+        proc.kill()
+        stdout, stderr = await proc.communicate()
+    output = (stdout.decode() + ("\n" + stderr.decode() if stderr else "")).strip()
+    if timed_out:
+        summary = f"Fixture tests timed out after {WORKSPACE_TIMEOUT}s."
+        status = "failed"
+    else:
+        summary = "All fixture tests passed." if proc.returncode == 0 else "Fixture tests failed."
+        status = "ok" if proc.returncode == 0 else "failed"
     return {
         "kind": "test_result",
-        "status": "ok" if proc.returncode == 0 else "failed",
+        "status": status,
         "summary": summary,
         "output": output[-4000:],
     }
@@ -121,10 +139,10 @@ def prepare_workspace_reply(turn_id: str) -> dict[str, Any]:
     }
 
 
-def apply_workspace_reply(turn_id: str, change_set: dict[str, Any]) -> dict[str, Any]:
+async def apply_workspace_reply(turn_id: str, change_set: dict[str, Any]) -> dict[str, Any]:
     ensure_workspace_exists()
     changed_paths = apply_change_set(change_set)
-    test_result = run_fixture_tests()
+    test_result = await run_fixture_tests()
     return {
         "kind": "apply_result",
         "turn_id": turn_id,
@@ -164,7 +182,7 @@ async def handle(msg: RoomEvent) -> None:
         if kind == "workspace_prepare_request":
             reply = prepare_workspace_reply(turn_id)
         else:
-            reply = apply_workspace_reply(turn_id, dict(payload.get("change_set", {})))
+            reply = await apply_workspace_reply(turn_id, dict(payload.get("change_set", {})))
         reply["elapsed_sec"] = round(time.monotonic() - started, 1)
     except Exception as exc:
         reply = {
@@ -181,12 +199,18 @@ async def handle(msg: RoomEvent) -> None:
         say(agent.handle, f"{GREEN}posted{RESET} result in {reply['elapsed_sec']:.1f}s")
     else:
         say(agent.handle, f"{RED}error{RESET}: {reply.get('error', 'unknown error')}")
-    await agent.post_room_message(
-        msg.room_id,
-        json.dumps(reply),
-        content_type="application/json",
-        trace_id=turn_id,
-    )
+    try:
+        await agent.post_room_message(
+            msg.room_id,
+            json.dumps(reply),
+            content_type="application/json",
+            trace_id=turn_id,
+        )
+    except Exception as exc:
+        if is_room_closed_error(exc):
+            say(agent.handle, f"{RED}room closed{RESET} before workspace reply could be posted")
+        else:
+            raise
 
 
 async def main() -> None:

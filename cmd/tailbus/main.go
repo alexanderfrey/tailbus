@@ -17,7 +17,9 @@ import (
 	messagepb "github.com/alexanderfrey/tailbus/api/messagepb"
 	"github.com/alexanderfrey/tailbus/internal/auth"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/status"
 )
 
 // tokenCreds implements grpc.PerRPCCredentials for Bearer token auth.
@@ -34,6 +36,10 @@ func short(id string) string {
 		return id[:8]
 	}
 	return id
+}
+
+func isDeadlineError(err error) bool {
+	return err != nil && status.Code(err) == codes.DeadlineExceeded
 }
 
 func stripPort(addr string) string {
@@ -608,8 +614,11 @@ func main() {
 			os.Exit(1)
 		}
 
+		fireCtx, cancel := context.WithTimeout(ctx, *fireTimeout)
+		defer cancel()
+
 		// Subscribe to get the response
-		stream, err := client.Subscribe(ctx, &agentpb.SubscribeRequest{Handle: tmpHandle})
+		stream, err := client.Subscribe(fireCtx, &agentpb.SubscribeRequest{Handle: tmpHandle})
 		if err != nil {
 			logger.Error("subscribe failed", "error", err)
 			os.Exit(1)
@@ -629,16 +638,17 @@ func main() {
 		sessionID := openResp.SessionId
 
 		// Wait for response on that session
-		deadline := time.After(*fireTimeout)
 		for {
-			select {
-			case <-deadline:
+			if fireCtx.Err() == context.DeadlineExceeded {
 				fmt.Fprintf(os.Stderr, "timeout waiting for response from @%s\n", target)
 				os.Exit(1)
-			default:
 			}
 			msg, err := stream.Recv()
 			if err != nil {
+				if fireCtx.Err() == context.DeadlineExceeded || isDeadlineError(err) {
+					fmt.Fprintf(os.Stderr, "timeout waiting for response from @%s\n", target)
+					os.Exit(1)
+				}
 				logger.Error("stream error", "error", err)
 				os.Exit(1)
 			}
