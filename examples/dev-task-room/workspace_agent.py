@@ -27,6 +27,7 @@ from dev_task_common import (
     is_room_closed_error,
     iter_workspace_files,
     parse_json,
+    read_workspace_file_map,
     read_workspace_snapshot,
     reset_workspace,
     say,
@@ -128,6 +129,7 @@ async def run_fixture_tests() -> dict[str, Any]:
 
 def prepare_workspace_reply(turn_id: str) -> dict[str, Any]:
     files = reset_workspace()
+    workspace_file_map = read_workspace_file_map()
     snapshot = read_workspace_snapshot()
     return {
         "kind": "workspace_prepare_reply",
@@ -138,6 +140,7 @@ def prepare_workspace_reply(turn_id: str) -> dict[str, Any]:
         "summary": "Workspace reset from template.",
         "workspace_root": str(WORKSPACE_ROOT),
         "workspace_files": files,
+        "workspace_file_map": workspace_file_map,
         "workspace_snapshot": snapshot,
     }
 

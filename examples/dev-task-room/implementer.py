@@ -26,7 +26,6 @@ from dev_task_common import (
     is_room_closed_error,
     parse_json,
     progress_pinger,
-    replay_room_with_retry,
     room_task_from_events,
     run_codex_json,
     say,
@@ -96,18 +95,31 @@ def build_prompt(payload: dict[str, object], task: dict[str, object], transcript
 
 
 async def implement_turn(room_id: str, payload: dict[str, object]) -> dict[str, object]:
-    events = await replay_room_with_retry(agent, room_id)
-    task = room_task_from_events(events)
-    transcript = "\n".join(
-        event.payload for event in events if event.event_type == "message_posted" and event.content_type == "application/json"
-    )
-    transcript = truncate_preserving_ends(transcript, 12000)
+    progress_state = payload.get("_progress_state")
+    # Try to replay room for transcript context, but don't block if it fails —
+    # the orchestrator includes all essential data in the payload already.
+    transcript = ""
+    task: dict[str, object] = {}
+    try:
+        events = await asyncio.wait_for(agent.replay_room(room_id), timeout=5.0)
+        task = room_task_from_events(events)
+        transcript = "\n".join(
+            event.payload for event in events if event.event_type == "message_posted" and event.content_type == "application/json"
+        )
+        transcript = truncate_preserving_ends(transcript, 12000)
+        say(agent.handle, f"room replay OK ({len(events)} events, {len(transcript)} chars)")
+    except Exception as exc:
+        say(agent.handle, f"{YELLOW}room replay skipped{RESET}: {exc}")
     prompt = build_prompt(payload, task, transcript)
     output_path = tmp_json_path("dev_task_implement", str(payload.get("turn_id", "")))
+    say(agent.handle, f"prompt ready ({len(prompt)} chars); calling codex exec...")
+    if isinstance(progress_state, dict):
+        progress_state["summary"] = "Waiting for Codex response."
     started = time.monotonic()
     raw = (await run_codex_json(SYSTEM_PROMPT + "\n\n" + prompt, output_path, CODEX_TIMEOUT)).strip()
     elapsed = round(time.monotonic() - started, 1)
     if raw.startswith("[codex error]"):
+        say(agent.handle, f"{RED}codex error{RESET} after {elapsed:.1f}s: {raw[:200]}")
         return {
             "kind": "implement_reply",
             "turn_id": payload.get("turn_id", ""),
@@ -118,10 +130,12 @@ async def implement_turn(room_id: str, payload: dict[str, object]) -> dict[str, 
             "error": raw,
             "elapsed_sec": elapsed,
         }
+    say(agent.handle, f"codex returned {len(raw)} chars in {elapsed:.1f}s; parsing JSON...")
     from dev_task_common import parse_json_object
 
     change_set = parse_json_object(raw)
     if not change_set:
+        say(agent.handle, f"{RED}invalid JSON{RESET}: {raw[:120]}")
         return {
             "kind": "implement_reply",
             "turn_id": payload.get("turn_id", ""),
@@ -133,6 +147,8 @@ async def implement_turn(room_id: str, payload: dict[str, object]) -> dict[str, 
             "raw_output": raw[:2000],
             "elapsed_sec": elapsed,
         }
+    file_count = len(change_set.get("files", []))
+    say(agent.handle, f"parsed change set: {file_count} file(s), summary: {str(change_set.get('summary', ''))[:100]}")
     return {
         "kind": "implement_reply",
         "turn_id": payload.get("turn_id", ""),
@@ -167,6 +183,7 @@ async def handle(msg: RoomEvent) -> None:
         seen_turns.discard(seen_turns_order.popleft())
     model_label = CODEX_MODEL or "codex default model"
     say(agent.handle, f"implementing via {BOLD}{model_label}{RESET}")
+    progress_state = {"summary": "Implementer building prompt."}
     progress_task = asyncio.create_task(
         progress_pinger(
             agent,
@@ -175,11 +192,12 @@ async def handle(msg: RoomEvent) -> None:
             round_no=int(payload.get("round", 0)),
             target_handle=agent.handle,
             target_capability="dev.implement",
-            summary="Implementer is still preparing the change set.",
+            summary=lambda: str(progress_state["summary"]),
             interval=TURN_PROGRESS_INTERVAL,
         )
     )
     try:
+        payload["_progress_state"] = progress_state
         reply = await implement_turn(msg.room_id, payload)
     except Exception as exc:
         reply = {

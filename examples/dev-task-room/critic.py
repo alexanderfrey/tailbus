@@ -30,9 +30,9 @@ from dev_task_common import (
     say,
 )
 
-SYSTEM_PROMPT = """You are the critical reviewer in a Tailbus engineering room.
+CHUNK_SYSTEM_PROMPT = """You are the critical reviewer in a Tailbus engineering room.
 
-Review the proposed change set against the task and workspace.
+Review only the scoped chunk of the proposed change set against the task.
 
 Return exactly one JSON object:
 {
@@ -45,7 +45,28 @@ Return exactly one JSON object:
 
 Rules:
 - Be strict about correctness and regression risk.
-- Approve only if the change set is good enough to apply in the local workspace.
+- Review only the provided scope. Do not speculate about files or ranges outside it.
+- Approve only if the provided scope is good enough at the chunk level.
+- Return JSON only.
+"""
+
+SYNTHESIS_SYSTEM_PROMPT = """You are the final reviewer in a Tailbus engineering room.
+
+You will receive the task, changed-path manifest, and completed chunk-review outputs.
+
+Return exactly one JSON object:
+{
+  "summary": "short review summary",
+  "decision": "approve" or "revise",
+  "findings": ["bug or risk"],
+  "required_changes": ["concrete requested fix"],
+  "test_gaps": ["missing test coverage"]
+}
+
+Rules:
+- Focus on cross-file issues, missing integration concerns, and deduping chunk findings.
+- Do not re-review raw code that is not present.
+- Approve only if the overall change set is good enough to apply in the local workspace.
 - Return JSON only.
 """
 
@@ -69,23 +90,72 @@ seen_turns_order: collections.deque[str] = collections.deque()
 MAX_SEEN_TURNS = 500
 
 
+def build_chunk_prompt(payload: dict[str, object], task_text: str) -> str:
+    review_chunk = dict(payload.get("review_chunk", {}))
+    parts = [
+        "Task:",
+        task_text,
+        "",
+        f"Chunk: {payload.get('chunk_id', '')}",
+        f"Scope paths: {json.dumps(payload.get('scope_paths', []))}",
+        f"Scope ranges: {json.dumps(payload.get('scope_ranges', []))}",
+        f"Changed paths: {json.dumps(payload.get('change_paths', []))}",
+        "",
+        "Scoped sections:",
+        json.dumps(review_chunk.get("sections", []), indent=2),
+    ]
+    return "\n".join(parts)
+
+
+def build_synthesis_prompt(payload: dict[str, object], task_text: str) -> str:
+    chunk_reviews = [
+        {
+            "chunk_id": item.get("chunk_id", ""),
+            "summary": item.get("summary", ""),
+            "scope_paths": item.get("scope_paths", []),
+            "scope_ranges": item.get("scope_ranges", []),
+            "findings": item.get("findings", []),
+            "required_changes": item.get("required_changes", []),
+            "test_gaps": item.get("test_gaps", []),
+        }
+        for item in list(payload.get("chunk_reviews", []))
+    ]
+    parts = [
+        "Task:",
+        task_text,
+        "",
+        f"Implementer summary: {payload.get('implement_summary', '')}",
+        f"Changed paths: {json.dumps(payload.get('change_paths', []))}",
+        f"Chunk review count: {payload.get('chunk_total', 0)}",
+        "",
+        "Chunk reviews:",
+        json.dumps(chunk_reviews, indent=2),
+    ]
+    return "\n".join(parts)
+
+
 async def review_turn(payload: dict[str, object]) -> dict[str, object]:
     progress_state = payload.get("_progress_state")
+    review_mode = str(payload.get("review_mode", "chunk"))
     task_text = str(payload.get("task", "")).strip()
-    user_prompt = (
-        f"Task:\n{task_text}\n\n"
-        f"Workspace snapshot:\n{payload.get('workspace_snapshot', '')}\n\n"
-        f"Proposed change set:\n{json.dumps(payload.get('change_set', {}), indent=2)}\n"
-    )
+    if review_mode == "synthesis":
+        user_prompt = build_synthesis_prompt(payload, task_text)
+        system_prompt = SYNTHESIS_SYSTEM_PROMPT
+    else:
+        user_prompt = build_chunk_prompt(payload, task_text)
+        system_prompt = CHUNK_SYSTEM_PROMPT
     started = time.monotonic()
     if isinstance(progress_state, dict):
         progress_state["summary"] = "Critic waiting for LM Studio response."
-    say(agent.handle, f"review prompt ready ({len(user_prompt)} chars); calling {BOLD}{LLM_BASE_URL}{RESET}")
+    say(
+        agent.handle,
+        f"{review_mode} prompt ready ({len(user_prompt)} chars); calling {BOLD}{LLM_BASE_URL}{RESET}",
+    )
 
     try:
         raw = (
             await asyncio.wait_for(
-                asyncio.shield(asyncio.to_thread(llm_call, SYSTEM_PROMPT, user_prompt)),
+                asyncio.shield(asyncio.to_thread(llm_call, system_prompt, user_prompt)),
                 timeout=REVIEW_TIMEOUT,
             )
         ).strip()
@@ -143,11 +213,15 @@ async def review_turn(payload: dict[str, object]) -> dict[str, object]:
         "author": agent.handle,
         "status": "ok",
         "capability": "dev.review",
+        "review_mode": review_mode,
+        "chunk_id": str(payload.get("chunk_id", "")),
         "summary": str(result.get("summary", "Review complete.")),
         "decision": str(result.get("decision", "revise")),
         "findings": list(result.get("findings", [])),
         "required_changes": list(result.get("required_changes", [])),
         "test_gaps": list(result.get("test_gaps", [])),
+        "coverage_paths": list(payload.get("scope_paths", [])),
+        "coverage_ranges": list(payload.get("scope_ranges", [])),
         "elapsed_sec": elapsed,
     }
 
