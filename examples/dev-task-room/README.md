@@ -42,7 +42,7 @@ Then run a curated task:
 
 ```bash
 ./run.sh scenarios
-./run.sh fire retry-client
+./run.sh fire snake-clone
 ```
 
 Or send an arbitrary task:
@@ -64,17 +64,21 @@ Useful commands:
 - `python3`
 - `curl`
 - `codex` CLI on `PATH`
-- LM Studio running at `http://localhost:1234/v1` unless `LLM_BASE_URL` is set
+- LM Studio running at `http://127.0.0.1:1234/v1` unless `LLM_BASE_URL` is set
 
 Optional env vars:
 
 ```bash
-LLM_BASE_URL=http://localhost:1234/v1
+LLM_BASE_URL=http://127.0.0.1:1234/v1
 LLM_MODEL=<lm-studio-model>
 CODEX_MODEL=gpt-5.1-codex-mini
-TURN_TIMEOUT=120
+TURN_TIMEOUT=600
+CODEX_TIMEOUT=600
+FIRE_TIMEOUT=600s
 WORKSPACE_ROOT=/tmp/devtaskroom-workspace
 ```
+
+For larger tasks such as `snake-clone`, the default example now allows longer turns before timing out. Override `TURN_TIMEOUT`, `CODEX_TIMEOUT`, or `FIRE_TIMEOUT` if you want tighter or looser budgets.
 
 `CODEX_MODEL` defaults to `gpt-5.1-codex-mini`. Override it if your local `codex` account supports a different model set.
 
@@ -100,6 +104,10 @@ The orchestrator writes a markdown transcript to:
 
 - `examples/dev-task-room/output/`
 
+It also persists live task and turn state snapshots to:
+
+- `examples/dev-task-room/output/state/`
+
 That file includes:
 - the task
 - discovered collaborators
@@ -108,3 +116,9 @@ That file includes:
 - changed files
 - test result
 - the room transcript
+
+The state snapshot includes:
+- room id and lifecycle status
+- per-turn request/progress/reply/timeout data
+- latest workflow phase
+- output artifact paths for successful or failed runs

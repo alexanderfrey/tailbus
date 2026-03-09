@@ -23,7 +23,7 @@ from tailbus import AsyncAgent, BridgeError, Manifest, RoomEvent
 
 ROOM_REPLAY_RETRIES = int(os.environ.get("DEV_TASK_ROOM_REPLAY_RETRIES", "12"))
 ROOM_REPLAY_DELAY = float(os.environ.get("DEV_TASK_ROOM_REPLAY_DELAY", "0.5"))
-LLM_BASE_URL = os.environ.get("LLM_BASE_URL", "http://localhost:1234/v1")
+LLM_BASE_URL = os.environ.get("LLM_BASE_URL", "http://127.0.0.1:1234/v1")
 LLM_MODEL = os.environ.get("LLM_MODEL", "")
 LLM_REQUEST_TIMEOUT = float(os.environ.get("LLM_REQUEST_TIMEOUT", "180"))
 REVIEW_TIMEOUT = float(os.environ.get("REVIEW_TIMEOUT", "120"))
@@ -187,7 +187,7 @@ def llm_call(system: str, user: str, *, temperature: float = 0.2, max_tokens: in
         headers={"Content-Type": "application/json"},
     )
     try:
-        with urllib.request.urlopen(req, timeout=180) as resp:
+        with urllib.request.urlopen(req, timeout=LLM_REQUEST_TIMEOUT) as resp:
             result = json.loads(resp.read())
             content = str(result["choices"][0]["message"]["content"])
             if "<think>" in content:

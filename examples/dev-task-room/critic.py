@@ -23,12 +23,10 @@ from dev_task_common import (
     RESET,
     YELLOW,
     is_room_closed_error,
-    llm_stream_call,
+    llm_call,
     parse_json,
     parse_json_object,
     progress_pinger,
-    replay_room_with_retry,
-    room_task_from_events,
     say,
 )
 
@@ -71,29 +69,23 @@ seen_turns_order: collections.deque[str] = collections.deque()
 MAX_SEEN_TURNS = 500
 
 
-async def review_turn(room_id: str, payload: dict[str, object]) -> dict[str, object]:
+async def review_turn(payload: dict[str, object]) -> dict[str, object]:
     progress_state = payload.get("_progress_state")
-    events = await replay_room_with_retry(agent, room_id)
-    task = room_task_from_events(events)
+    task_text = str(payload.get("task", "")).strip()
     user_prompt = (
-        f"Task:\n{payload.get('task', task.get('task', ''))}\n\n"
+        f"Task:\n{task_text}\n\n"
         f"Workspace snapshot:\n{payload.get('workspace_snapshot', '')}\n\n"
         f"Proposed change set:\n{json.dumps(payload.get('change_set', {}), indent=2)}\n"
     )
     started = time.monotonic()
-
-    def on_chunk(text: str) -> None:
-        if isinstance(progress_state, dict):
-            cleaned = " ".join(text.strip().split())
-            if cleaned:
-                progress_state["summary"] = f"Critic streaming: {cleaned[-120:]}"
+    if isinstance(progress_state, dict):
+        progress_state["summary"] = "Critic waiting for LM Studio response."
+    say(agent.handle, f"review prompt ready ({len(user_prompt)} chars); calling {BOLD}{LLM_BASE_URL}{RESET}")
 
     try:
         raw = (
             await asyncio.wait_for(
-                asyncio.shield(
-                    asyncio.to_thread(llm_stream_call, SYSTEM_PROMPT, user_prompt, on_chunk=on_chunk)
-                ),
+                asyncio.shield(asyncio.to_thread(llm_call, SYSTEM_PROMPT, user_prompt)),
                 timeout=REVIEW_TIMEOUT,
             )
         ).strip()
@@ -119,6 +111,17 @@ async def review_turn(room_id: str, payload: dict[str, object]) -> dict[str, obj
             "capability": "dev.review",
             "summary": "",
             "error": raw,
+            "elapsed_sec": elapsed,
+        }
+    if not raw:
+        return {
+            "kind": "review_reply",
+            "turn_id": payload.get("turn_id", ""),
+            "author": agent.handle,
+            "status": "error",
+            "capability": "dev.review",
+            "summary": "",
+            "error": "LM Studio returned empty output",
             "elapsed_sec": elapsed,
         }
     result = parse_json_object(raw)
@@ -170,7 +173,7 @@ async def handle(msg: RoomEvent) -> None:
     while len(seen_turns) > MAX_SEEN_TURNS:
         seen_turns.discard(seen_turns_order.popleft())
     say(agent.handle, f"reviewing via {BOLD}{LLM_BASE_URL}{RESET}")
-    progress_state = {"summary": "Critic started streaming review output."}
+    progress_state = {"summary": "Critic preparing review prompt."}
     progress_task = asyncio.create_task(
         progress_pinger(
             agent,
@@ -185,7 +188,7 @@ async def handle(msg: RoomEvent) -> None:
     )
     try:
         payload["_progress_state"] = progress_state
-        reply = await review_turn(msg.room_id, payload)
+        reply = await review_turn(payload)
     except Exception as exc:
         reply = {
             "kind": "review_reply",
